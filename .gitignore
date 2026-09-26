@@ -7,3 +7,8 @@
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# 測試工具產物
+node_modules/
+test-results/
+playwright-report/
