@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>潛在客戶｜本機工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23cbd3df'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar" aria-label="主選單">
+    <button class="avatar" data-action="account" aria-label="本機個人設定" title="本機個人設定"></button>
+    <nav class="nav-actions">
+      <button class="add-button" data-action="add" aria-label="新增專案" title="新增專案" data-icon="plus"></button>
+      <button data-action="home" aria-label="潛在客戶" title="潛在客戶" data-icon="folder" aria-current="page"></button>
+      <button data-action="knowledge" aria-label="知識庫" title="知識庫" data-icon="book"></button>
+      <button data-action="account" aria-label="個人設定" title="個人設定" data-icon="user"></button>
+      <button data-action="export" aria-label="匯出本機資料" title="匯出本機資料" data-icon="code"></button>
+    </nav>
+    <button class="help-button" data-action="help" aria-label="使用說明" title="使用說明" data-icon="help"></button>
+  </aside>
+  <main>
+    <!-- 潛在客戶清單 -->
+    <div id="list-view">
+      <header><h1>潛在客戶</h1></header>
+      <section class="content" aria-label="客戶清單">
+        <div class="selection-bar" hidden><span id="selected-count"></span><button data-action="complete-selected">標記已完成</button><button data-action="clear-selection">取消選取</button></div>
+        <div class="table-scroll" role="region" aria-label="客戶資料表，可左右捲動" tabindex="0">
+          <table>
+            <colgroup><col style="width:4%"><col style="width:13%"><col style="width:8%"><col style="width:10%"><col style="width:11%"><col style="width:17.5%"><col style="width:10%"><col style="width:9.5%"><col style="width:7.5%"><col style="width:9.5%"></colgroup>
+            <thead><tr><th><input id="select-all" type="checkbox" aria-label="全選此頁"></th><th scope="col">名稱</th><th scope="col">聯絡人</th><th scope="col">洽詢日期</th><th scope="col">需求類型</th><th scope="col">電子信箱</th><th scope="col">電話</th><th scope="col">專案到期日</th><th scope="col">對話完成</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <footer><div class="pagination"><button id="prev" aria-label="上一頁" data-icon="left"></button><span id="pages"></span><button id="next" aria-label="下一頁" data-icon="right"></button></div><span id="count"></span></footer>
+      </section>
+    </div>
+    <!-- 專案內頁（由 app.js 產生內容） -->
+    <div id="detail-view" hidden></div>
+  </main>
+
+  <!-- 快速新增專案 -->
+  <dialog id="editor" aria-labelledby="editor-title">
+    <form id="project-form">
+      <div class="dialog-heading"><h2 id="editor-title">新增專案</h2><button type="button" data-close aria-label="關閉" data-icon="close"></button></div>
+      <div class="form-grid">
+        <label class="wide">名稱 <input name="name" required maxlength="100" placeholder="例如：王小姐 台中沙鹿 新成屋"></label>
+        <label>聯絡人<input name="contact" maxlength="60"></label><label>洽詢日期<input name="date" type="date" required></label>
+        <label>需求類型<select name="type"></select></label>
+        <label>專案到期日<input name="due" type="date"></label>
+        <label>電子信箱<input name="email" type="email" maxlength="150"></label><label>電話<input name="phone" type="tel" maxlength="40" inputmode="tel"></label>
+      </div>
+      <p class="muted">建立後會直接進入專案，再用「編輯全部資料」一次補齊需求。</p>
+      <div class="dialog-footer"><button type="button" data-close>取消</button><button class="primary" type="submit">建立專案</button></div>
+    </form>
+  </dialog>
+
+  <!-- 一次編輯全部資料的側邊表單 -->
+  <dialog id="drawer" class="drawer" aria-labelledby="drawer-title">
+    <form id="drawer-form">
+      <div class="drawer-head">
+        <div class="drawer-title-wrap"><h2 id="drawer-title">編輯專案資料</h2><div id="drawer-progress" class="progress-line"></div></div>
+        <button type="button" data-drawer-close aria-label="關閉" data-icon="close"></button>
+      </div>
+      <nav class="drawer-tabs" id="drawer-tabs" aria-label="表單區塊"></nav>
+      <div class="drawer-body" id="drawer-body"></div>
+      <div class="drawer-foot">
+        <span id="dirty-note" class="dirty-note" aria-live="polite"></span>
+        <button type="button" data-drawer-close>取消</button>
+        <button class="primary" type="submit">儲存變更</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="discard-dialog" aria-labelledby="discard-title"><div class="dialog-heading"><h2 id="discard-title">還沒儲存</h2></div><p>剛才的修改尚未儲存，確定要關閉嗎？</p><div class="dialog-footer"><button id="discard-confirm">放棄變更</button><button class="primary" id="discard-cancel">繼續編輯</button></div></dialog>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title"><div class="dialog-heading"><h2 id="confirm-title">刪除專案</h2><button data-close aria-label="關閉" data-icon="close"></button></div><p id="confirm-copy"></p><p class="muted">刪除後可從畫面下方的提示復原。</p><div class="dialog-footer"><button data-close>取消</button><button class="danger" id="confirm-delete">刪除</button></div></dialog>
+  <dialog id="info-dialog" aria-labelledby="info-title"><div class="dialog-heading"><h2 id="info-title"></h2><button data-close aria-label="關閉" data-icon="close"></button></div><div id="info-body"></div></dialog>
+  <div id="toast" role="status" hidden><span id="toast-text"></span><button id="toast-action" hidden></button><button aria-label="關閉通知" id="dismiss-toast" data-icon="close"></button></div>
+</body>
+</html>
