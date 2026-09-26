@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>潛在客戶｜本機工作台</title>
+  <title>潛在客戶｜Genie-Local v4</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23cbd3df'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" defer></script>
@@ -25,11 +25,11 @@
     <div id="list-view">
       <header><h1>潛在客戶</h1></header>
       <section class="content" aria-label="客戶清單">
-        <div class="selection-bar" hidden><span id="selected-count"></span><button data-action="complete-selected">標記已完成</button><button data-action="clear-selection">取消選取</button></div>
+        <div class="selection-bar" hidden><span id="selected-count"></span><button data-action="delete-selected">刪除所選</button><button data-action="clear-selection">取消選取</button></div>
         <div class="table-scroll" role="region" aria-label="客戶資料表，可左右捲動" tabindex="0">
           <table>
-            <colgroup><col style="width:4%"><col style="width:13%"><col style="width:8%"><col style="width:10%"><col style="width:11%"><col style="width:17.5%"><col style="width:10%"><col style="width:9.5%"><col style="width:7.5%"><col style="width:9.5%"></colgroup>
-            <thead><tr><th><input id="select-all" type="checkbox" aria-label="全選此頁"></th><th scope="col">名稱</th><th scope="col">聯絡人</th><th scope="col">洽詢日期</th><th scope="col">需求類型</th><th scope="col">電子信箱</th><th scope="col">電話</th><th scope="col">專案到期日</th><th scope="col">對話完成</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
+            <colgroup><col style="width:3%"><col style="width:12%"><col style="width:6%"><col style="width:8%"><col style="width:9%"><col style="width:12%"><col style="width:9%"><col style="width:8%"><col style="width:8%"><col style="width:17%"><col style="width:8%"></colgroup>
+            <thead><tr><th><input id="select-all" type="checkbox" aria-label="全選此頁"></th><th scope="col">名稱</th><th scope="col">聯絡人</th><th scope="col">洽詢日期</th><th scope="col">需求類型</th><th scope="col">電子信箱</th><th scope="col">電話</th><th scope="col">專案到期日</th><th scope="col">需求來源</th><th scope="col">目前步驟</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
             <tbody id="rows"></tbody>
           </table>
         </div>
@@ -45,7 +45,7 @@
     <form id="project-form">
       <div class="dialog-heading"><h2 id="editor-title">新增專案</h2><button type="button" data-close aria-label="關閉" data-icon="close"></button></div>
       <div class="form-grid">
-        <label class="wide">名稱 <input name="name" required maxlength="100" placeholder="例如：王小姐 台中沙鹿 新成屋"></label>
+        <label class="wide">專案名稱 <input name="name" required maxlength="100" placeholder="例如：王小姐 台中沙鹿 新成屋"></label>
         <label>聯絡人<input name="contact" maxlength="60"></label><label>洽詢日期<input name="date" type="date" required></label>
         <label>需求類型<select name="type"></select></label>
         <label>專案到期日<input name="due" type="date"></label>
