@@ -1,0 +1,9 @@
+# 本機備份（git 之前的 zip 還原點）
+.backups/
+# 本機工具設定
+.claude/
+.codex/
+# 系統檔
+Thumbs.db
+desktop.ini
+.DS_Store
