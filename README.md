@@ -83,3 +83,20 @@ v4 已保存的視覺／3D 與提案依據格式不同，升級後需依新依�
 語法檢查：`node --check app.js`。
 
 需要本機伺服器時，可執行 `python -m http.server 4173 --bind 127.0.0.1`，開啟 `http://127.0.0.1:4173`。
+
+## 自動化測試
+
+測試使用 `@playwright/test` 1.63.0（僅開發相依套件），產品仍可直接開啟，免建置。需要 Node.js、npm、Python，以及已安裝的 Playwright Chromium。
+
+```sh
+npm install
+npx playwright test
+```
+
+若 Windows PowerShell 的執行政策封鎖 `npm.ps1`／`npx.ps1`，使用對應的 `npm.cmd install`／`npx.cmd playwright test`，不需修改執行政策。
+
+官方執行器會以 headless Chromium 執行測試，並透過 `playwright.config.js` 的 `webServer` 自動啟動 `http://127.0.0.1:4173`；該網址已有伺服器時會沿用，請確保服務的是本專案。每個案例使用獨立瀏覽器環境並清空 localStorage，不影響平常瀏覽器中的資料。
+
+`tests/list.spec.js`、`brief.spec.js`、`flow.spec.js`、`estimate.spec.js`、`layout.spec.js` 涵蓋清單、需求表單、流程狀態連動、估價及 375×812 手機版面，共用操作集中在 `tests/helpers.js`。依 `docs/測試規格.md` 對應驗收 1～19；驗收 20 的個資掃描由 Claude 在推送前另行處理，不寫入測試。
+
+瀏覽器測試只使用 `npx playwright test`，不自行啟動瀏覽器、不開除錯埠、不使用 CDP／Puppeteer 或 TEMP 腳本。測試若揭露產品問題，保留失敗結果及重現步驟，由 Claude 複查裁決。
