@@ -1,6 +1,8 @@
 # Genie-Local 專案規則
 
-參考 genie.dotbrand.design 重製的潛在客戶／提案流程工作台。純前端（`index.html`、`app.js`、`styles.css`），免建置、無外部套件，資料存在瀏覽器 localStorage。
+參考 genie.dotbrand.design 重製的潛在客戶／提案流程工作台。純前端（`index.html`、`app.js`、`styles.css`，v5 起另有 `auth.js`、`leads.js`、`config.js`），免建置。本機專案存在瀏覽器 localStorage；v5「客戶名單」經登入讀取 Supabase。
+
+**套件例外（2026-09-29 使用者決定）**：唯一允許的外部套件是 Supabase 官方 supabase-js，必須是固定版本、檔案放在 `vendor/`（同源供應，不從 CDN 載入），並在 README 記錄版本、來源與 SHA-256。其他套件一律不加。
 
 ## 分工（開發協作 SOP：`D:\Desktop\ai-agent\000_Agent\skills\claude-plans-codex-builds\SKILL.md`）
 - **Claude（總指揮）**：方向、規格、分派、裁決、驗收複查、git 提交。
@@ -20,5 +22,5 @@
   - 最終驗收仍由 Claude 負責；自動化測試結果要附在回報裡。
 
 ## 範圍提醒
-- 資料庫（Messenger 需求表單機器人的 Supabase）與提案匯出是未來方向，除非規格要求，不要實作。
-- Supabase 金鑰等秘密絕不可放進前端或提交。
+- 資料庫只做規格（`docs/v5-客戶名單規格.md`）要求的部分；專案存資料庫、提案匯出是未來方向，除非規格要求，不要實作。
+- 前端只能放 Supabase **publishable key**（`sb_publishable_…`，設計上公開，安全靠登入＋GRANT＋RLS），且只能用在 `apikey`，不可當 Bearer。**secret key、密碼、個人信箱、客戶資料絕不可放進前端或提交**（本 repo 是公開的）。
