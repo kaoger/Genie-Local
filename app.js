@@ -3,6 +3,7 @@
 /* ================= 圖示 ================= */
 const icons={plus:'<path d="M12 5v14M5 12h14"/>',folder:'<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 11h18"/>',book:'<path d="M12 5c-3-2-6-2-10-2v16c4 0 7 0 10 2 3-2 6-2 10-2V3c-4 0-7 0-10 2v16"/>',user:'<circle cx="12" cy="7" r="4"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/>',code:'<path d="M5 4h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="m9 9-2 3 2 3m6-6 2 3-2 3"/>',help:'<circle cx="12" cy="12" r="10"/><path d="M9.1 8a3 3 0 0 1 5.8 1c0 2-3 2-3 4m.1 3h.01"/>',copy:'<rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2"/>',trash:'<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6m4-6v6"/>',left:'<path d="m15 18-6-6 6-6"/>',right:'<path d="m9 18 6-6-6-6"/>',close:'<path d="m6 6 12 12M6 18 18 6"/>',check:'<path d="M20 6 9 17l-5-5"/>',lock:'<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',alert:'<path d="M12 8v5m0 3h.01"/>',edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',spark:'<path d="M12 3v4m0 10v4M3 12h4m10 0h4M6 6l2.5 2.5m7 7L18 18M6 18l2.5-2.5m7-7L18 6"/>'};
 const icon = name => `<svg aria-hidden="true" viewBox="0 0 24 24">${icons[name]||''}</svg>`;
+icons.users='<circle cx="8" cy="8" r="3"/><path d="M2 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6m1 4a5 5 0 0 1 3 5"/>';
 document.querySelectorAll('[data-icon]').forEach(el=>el.innerHTML=icon(el.dataset.icon));
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -366,8 +367,35 @@ function saveDrawer(){
   toast(`已儲存 ${count} 個欄位。${stale.length?'需要更新：'+stale.map(s=>s.label).join('、'):''}`,{actionLabel:stale.length?'前往':'',onAction:()=>{location.hash=`#/p/${encodeURIComponent(p.id)}/${stale[0].id}`;},duration:8000});
 }
 
-/* ================= 頁面切換（網址 #/p/專案/步驟） ================= */
+/* ================= 客戶名單登入（Step B） ================= */
+let leadLoginError = '';
+function renderLeads() {
+  if (location.hash !== '#/leads') return;
+  const { status, displayName, email } = window.GenieAuth.getState();
+  let head = '<h1>客戶名單</h1>', body = '';
+  if (status === 'checking') body = '<div class="auth-card" role="status">正在檢查登入狀態…</div>';
+  else if (status === 'denied') body = '<div class="auth-card"><h2>此帳號沒有權限，請聯絡管理者</h2><button type="button" class="primary" data-action="lead-switch">換個帳號登入</button></div>';
+  else if (status === 'member') {
+    head += `<div class="leads-account"><span>${esc(displayName || email)}</span><span aria-hidden="true">・</span><button type="button" data-action="lead-signout">登出</button></div>`;
+    body = '<div class="auth-card"><p>客戶名單（Step C 製作中）</p></div>';
+  } else body = `<div class="auth-card"><h2>登入客戶名單</h2><form id="leads-login"><label>信箱<input type="email" name="email" autocomplete="username" required></label><label>密碼<input type="password" name="password" autocomplete="current-password" required></label><p id="leads-error" class="auth-error" role="alert">${esc(leadLoginError)}</p><button class="primary" type="submit">登入</button></form><p class="muted">忘記密碼？請聯絡管理者重設</p></div>`;
+  $('#leads-view').innerHTML = `<header class="leads-header">${head}</header><section class="leads-content">${body}</section>`;
+}
+
+/* ================= 頁面切換（網址 #/p/專案/步驟、#/leads） ================= */
 function route(){
+  const leads = location.hash === '#/leads';
+  $('#leads-view').hidden = !leads;
+  document.querySelector('[data-action="leads"]').setAttribute('aria-current', leads ? 'page' : 'false');
+  document.querySelector('[data-action="home"]').setAttribute('aria-current', leads ? 'false' : 'page');
+  if (leads) {
+    $('#list-view').hidden = true;
+    $('#detail-view').hidden = true;
+    document.title = '客戶名單｜Genie-Local v5';
+    renderLeads();
+    $('main').scrollTop = 0;
+    return;
+  }
   const m=location.hash.match(/^#\/p\/([^/]+)(?:\/(\w+))?/);
   let p;try{p=m&&findProject(decodeURIComponent(m[1]));}catch{location.replace('#/');return;}
   if(m&&!p){location.replace('#/');return;}
@@ -380,6 +408,9 @@ function route(){
 function showInfo(title,body){$('#info-title').innerHTML=esc(title);$('#info-body').innerHTML=body;$('#info-dialog').showModal();}
 const actions={
 add:()=>openCreate(),home:()=>{if(location.hash&&location.hash!=='#/')location.hash='#/';else{page=0;render();$('main').scrollTop=0;}},
+leads:()=>{location.hash='#/leads';},
+'lead-switch':()=>{leadLoginError='';window.GenieAuth.signOut();},
+'lead-signout':()=>{leadLoginError='';window.GenieAuth.signOut();},
 'clear-selection':()=>{selected.clear();render();},
 'delete-selected':()=>confirmDelete([...selected]),
 'edit-all':()=>openDrawer(view.id),
@@ -435,6 +466,17 @@ if(b.dataset.delete)confirmDelete([b.dataset.delete]);
 if(b.dataset.page!==undefined){page=Number(b.dataset.page);render();$('main').scrollTop=0;}
 });
 $('#detail-view').addEventListener('submit',e=>{e.preventDefault();if(e.target.id==='meeting-form'&&saveMeeting())toast('會議記錄已儲存');});
+$('#leads-view').addEventListener('submit',async e=>{
+  if (e.target.id !== 'leads-login') return;
+  e.preventDefault();
+  const form=e.target;
+  leadLoginError='';
+  const { error }=await window.GenieAuth.signIn(form.elements.email.value.trim(),form.elements.password.value);
+  if (error && window.GenieAuth.getState().status === 'signedOut') {
+    leadLoginError=error;
+    renderLeads();
+  }
+});
 $('#detail-view').addEventListener('input',e=>{if(e.target.matches('[data-est-field],[data-est-condition]'))estimateEdit(e.target,false);});
 $('#detail-view').addEventListener('change',e=>{if(e.target.matches('[data-est-field],[data-est-condition]'))estimateEdit(e.target,true);});
 $('#rows').addEventListener('change',e=>{const id=e.target.dataset.select;if(id){e.target.checked?selected.add(id):selected.delete(id);render();}});
@@ -470,5 +512,6 @@ $('#dismiss-toast').addEventListener('click',()=>{$('#toast').hidden=true;clearT
 $('#prev').addEventListener('click',()=>{page--;render();$('main').scrollTop=0;});$('#next').addEventListener('click',()=>{page++;render();$('main').scrollTop=0;});
 $('#info-dialog').addEventListener('submit',e=>{e.preventDefault();try{if(e.target.id==='notes-form')localStorage.setItem('genie-local-notes',e.target.elements.knowledge.value);if(e.target.id==='account-form')localStorage.setItem('genie-local-name',e.target.elements.displayName.value);$('#info-dialog').close();toast('已儲存');}catch{toast('瀏覽器無法儲存，請確認儲存空間與隱私設定。');}});
 window.addEventListener('hashchange',route);
+window.GenieAuth.subscribe(renderLeads);
 route();if(storageWarning)toast('無法讀取先前資料，目前顯示示範內容。',{duration:10000});
 })();

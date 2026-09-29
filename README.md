@@ -1,6 +1,15 @@
 # Genie-Local v4.1｜潛在客戶本機工作台
 
-直接雙擊 `index.html`，使用新版 Chrome 或 Edge 開啟即可。純前端、免建置、無外部套件；字型使用本機 assets。
+直接雙擊 `index.html`，使用新版 Chrome 或 Edge 開啟即可。純前端、免建置；字型使用本機 assets。客戶名單登入使用唯一的外部套件 supabase-js，檔案由本站供應。
+
+## 客戶名單（v5）
+
+左側選單的「客戶名單」需要登入；本機專案與原有功能不需登入。此階段完成登入、登出與成員檢查，名單內容在 Step C 實作。忘記密碼請聯絡管理者重設。
+
+- `vendor/supabase.js`：Supabase 官方 supabase-js **2.117.2** UMD，來源 `https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js`，SHA-256 `59d39487c3589843b410322d8a3d562ce022aba1e5ccb16898ef3fb2a0da2ecd`。
+- 更新方式：選定官方版本後下載對應 UMD 到 `vendor/supabase.js`，核對來源與 SHA-256，更新這裡的版本、來源與雜湊，再跑語法與 Playwright 測試。不要改成從 CDN 載入。
+- `config.js` 只放 Supabase 網址和公開的 publishable key；它不是 secret key，只作為請求的 `apikey`。權限仍由登入、資料庫 GRANT 與 RLS 控制。secret key 不得放進前端。
+- 新增成員：由管理者建立 Supabase Auth 帳號，並依 VPS-message repo 的 `ops/genie-add-member.sql` 將使用者加入 `public.app_admins`。
 
 ## 六步驟流程
 
