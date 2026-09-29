@@ -91,20 +91,18 @@ test('驗收 16：重新生成策略只讓策略、視覺、3D 與提案需更�
   await expectSteps(page, { visual: '需更新', model3d: '需更新', estimate: '已完成', proposal: '需更新' });
 });
 
-test('驗收 18：改地址後重確認，估價自動恢復，策略與下游仍需更新', async ({ page }) => {
+test('驗收 18：只改地址時，重確認後策略與下游恢復完成', async ({ page }) => {
   await completeAllSteps(page);
   await editFields(page, { address: '測試路 100 號' });
-  await expectSteps(page, { brief: '需更新', strategy: '需更新', visual: '上游需更新', model3d: '上游需更新', estimate: '上游需更新', proposal: '需更新' });
+  await expectSteps(page, { brief: '需更新', strategy: '上游需更新', visual: '上游需更新', model3d: '上游需更新', estimate: '上游需更新', proposal: '需更新' });
   await markComplete(page, 'brief');
-  await expectSteps(page, { brief: '已完成', strategy: '需更新', visual: '上游需更新', model3d: '上游需更新', estimate: '已完成', proposal: '需更新' });
+  await expectSteps(page, { brief: '已完成', strategy: '已完成', visual: '已完成', model3d: '已完成', estimate: '已完成', proposal: '需更新' });
   await goStep(page, 'strategy');
-  await expect(page.locator('#status-slot')).toContainText('需求修改了：地址');
-  await expect(page.locator('#status-slot')).toContainText('策略依舊需求產生，須重新生成');
-  await expect(page.locator('#status-slot [data-action="complete"]')).toBeDisabled();
-  await expect(page.getByRole('button', { name: '重新生成', exact: true })).toBeEnabled();
+  await expect(page.locator('#status-slot')).not.toContainText('需重新生成');
+  await expect(page.locator('#status-slot')).not.toContainText('需求修改了：地址');
   await goStep(page, 'proposal');
-  await expect(page.locator('#status-slot')).toContainText('引用的內容已更新：需求總覽、策略企劃');
-  await expect(page.locator('#status-slot')).toContainText('『視覺發想』目前不是已完成');
+  await expect(page.locator('#status-slot')).toContainText('引用的內容已更新：需求總覽');
+  await expect(page.locator('#status-slot')).not.toContainText('『視覺發想』目前不是已完成');
   await expect(page.locator('#status-slot')).not.toContainText('尚未完成：業務估價');
 });
 

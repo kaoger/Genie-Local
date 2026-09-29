@@ -212,5 +212,37 @@ summary{cursor:pointer;font-weight:600;color:#343b43;overflow-wrap:anywhere}.car
 .totals{max-width:440px;margin:24px 0 0 auto}.totals>div{display:flex;justify-content:space-between;gap:20px;padding:10px 0}.totals dd{margin:0;text-align:right;overflow-wrap:anywhere}.totals dt{flex-shrink:0}.grand-total{border-top:1px solid #b8bfc7;font-weight:600;font-size:17px;color:#111}
 .card-head{flex-wrap:wrap}.card-head h2{overflow-wrap:anywhere}.doc-table td,.doc-table th{overflow-wrap:anywhere}
 #toast-text{min-width:0;overflow-wrap:anywhere}
++
+/* ================= 策略 AI 草稿 ================= */
+.strategy-workflow,.strategy-document,.strategy-edit,.strategy-preview{min-width:0;overflow-wrap:anywhere}
+.strategy-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.strategy-actions button{min-height:44px;border:1px solid #d6dbe0;padding:10px 14px}
+.strategy-actions .primary{border-color:#111}
+.strategy-document section,.strategy-preview section{border-top:1px solid #e5e7eb;padding-top:10px;margin-top:12px}
+.strategy-document h3,.strategy-preview h4{margin:0 0 6px;color:#343b43}
+.strategy-document p,.strategy-preview p{margin:0;line-height:1.65}
+.strategy-edit{display:grid;gap:18px}
+.strategy-edit textarea{display:block;min-height:110px}
+.strategy-warning,.strategy-warnings{background:#fffbeb;color:#805600;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;overflow-wrap:anywhere}
+.strategy-warnings p+p{margin-top:6px}
+#info-dialog:has(.strategy-dialog-body){width:min(760px,calc(100% - 32px));max-height:94dvh}
+#info-dialog:has(.strategy-dialog-body) #info-body{min-width:0;max-height:calc(94dvh - 105px);overflow-y:auto}
+.strategy-dialog-body{min-width:0;display:flex;flex-direction:column;gap:12px}
+.strategy-dialog-body>p{margin:0}
+.strategy-dialog-body textarea{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}
+.strategy-preview{padding-bottom:8px}
+.strategy-footer{position:sticky;bottom:0;background:#fff;padding:12px 0;margin-top:0;border-top:1px solid #e5e7eb;z-index:1}
+.strategy-footer button{min-height:44px}
+#info-dialog:has(.strategy-dialog-body) .dialog-heading button{min-width:44px;min-height:44px;display:grid;place-items:center}
+@media(max-width:600px){
+  .strategy-actions{flex-direction:column}.strategy-actions button{width:100%}
+  #info-dialog:has(.strategy-dialog-body){width:calc(100% - 12px);height:calc(100dvh - 12px);max-height:calc(100dvh - 12px);padding:16px;margin:auto}
+  #info-dialog:has(.strategy-dialog-body) #info-body{height:calc(100% - 50px);max-height:none;overflow-y:auto}
+  .strategy-dialog-body{min-height:100%}
+  .strategy-dialog-body>label{min-width:0}
+  .strategy-dialog-body textarea{width:100%;min-height:180px}
+  .strategy-footer{margin-top:auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .strategy-footer button{padding:8px 4px;white-space:normal}
+}
 @media(max-width:900px){.status-actions{max-width:260px}}
 @media(max-width:600px){.status-bar{flex-direction:column;align-items:stretch;padding:16px}.status-actions{max-width:none;justify-content:flex-start}.status-actions button{flex:1}.card{padding:16px}.reference-values{grid-template-columns:1fr}.segmented{width:100%}.segmented button{flex:1;padding:8px;font-size:12px}.totals{width:100%}.totals>div{gap:12px}.detail-top{gap:8px}.crumbs{flex:1}.detail-actions{max-width:60%}.detail-actions .primary{white-space:normal}.doc-table th{width:34%}.status-main .chip-row{margin-bottom:6px}.stepper li{flex-shrink:0}#toast{flex-wrap:wrap;gap:8px}#toast-text{flex:1 1 100%}}
