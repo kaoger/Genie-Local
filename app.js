@@ -367,8 +367,12 @@ function saveDrawer(){
   toast(`已儲存 ${count} 個欄位。${stale.length?'需要更新：'+stale.map(s=>s.label).join('、'):''}`,{actionLabel:stale.length?'前往':'',onAction:()=>{location.hash=`#/p/${encodeURIComponent(p.id)}/${stale[0].id}`;},duration:8000});
 }
 
-/* ================= 客戶名單登入（Step B） ================= */
+/* ================= 客戶名單登入與路由 ================= */
 let leadLoginError = '';
+const lastEmailKey = 'genie-last-email';
+function lastEmail() { try { return localStorage.getItem(lastEmailKey) || ''; } catch { return ''; } }
+function rememberEmail(email) { try { localStorage.setItem(lastEmailKey, email); } catch {} }
+function clearEmail() { try { localStorage.removeItem(lastEmailKey); } catch {} }
 function renderLeads() {
   if (location.hash !== '#/leads') return;
   const { status, displayName, email } = window.GenieAuth.getState();
@@ -377,9 +381,12 @@ function renderLeads() {
   else if (status === 'denied') body = '<div class="auth-card"><h2>此帳號沒有權限，請聯絡管理者</h2><button type="button" class="primary" data-action="lead-switch">換個帳號登入</button></div>';
   else if (status === 'member') {
     head += `<div class="leads-account"><span>${esc(displayName || email)}</span><span aria-hidden="true">・</span><button type="button" data-action="lead-signout">登出</button></div>`;
-    body = '<div class="auth-card"><p>客戶名單（Step C 製作中）</p></div>';
-  } else body = `<div class="auth-card"><h2>登入客戶名單</h2><form id="leads-login"><label>信箱<input type="email" name="email" autocomplete="username" required></label><label>密碼<input type="password" name="password" autocomplete="current-password" required></label><p id="leads-error" class="auth-error" role="alert">${esc(leadLoginError)}</p><button class="primary" type="submit">登入</button></form><p class="muted">忘記密碼？請聯絡管理者重設</p></div>`;
+    head += '<button type="button" class="lead-refresh" data-action="lead-refresh">重新整理</button>';
+    body = '<div id="leads-list" class="leads-list"><section aria-labelledby="pending-title"><h2 id="pending-title">待聯絡</h2><div data-lead-section="pending"></div></section><section aria-labelledby="contacted-title"><h2 id="contacted-title">已聯絡</h2><div data-lead-section="contacted"></div></section></div>';
+  } else body = `<div class="auth-card"><h2>登入客戶名單</h2><form id="leads-login"><label>信箱<input type="email" name="email" autocomplete="username" value="${esc(lastEmail())}" required></label><button type="button" class="auth-switch" data-action="lead-clear-email">不是這個帳號？</button><label>密碼<input type="password" name="password" autocomplete="current-password" required></label><p id="leads-error" class="auth-error" role="alert">${esc(leadLoginError)}</p><button class="primary" type="submit">登入</button></form><p class="muted">忘記密碼？請聯絡管理者重設</p></div>`;
   $('#leads-view').innerHTML = `<header class="leads-header">${head}</header><section class="leads-content">${body}</section>`;
+  if (status === 'member') window.GenieLeads.activate();
+  else window.GenieLeads.deactivate();
 }
 
 /* ================= 頁面切換（網址 #/p/專案/步驟、#/leads） ================= */
@@ -396,6 +403,7 @@ function route(){
     $('main').scrollTop = 0;
     return;
   }
+  window.GenieLeads.deactivate();
   const m=location.hash.match(/^#\/p\/([^/]+)(?:\/(\w+))?/);
   let p;try{p=m&&findProject(decodeURIComponent(m[1]));}catch{location.replace('#/');return;}
   if(m&&!p){location.replace('#/');return;}
@@ -411,6 +419,8 @@ add:()=>openCreate(),home:()=>{if(location.hash&&location.hash!=='#/')location.h
 leads:()=>{location.hash='#/leads';},
 'lead-switch':()=>{leadLoginError='';window.GenieAuth.signOut();},
 'lead-signout':()=>{leadLoginError='';window.GenieAuth.signOut();},
+'lead-refresh':()=>window.GenieLeads.refresh(),
+'lead-clear-email':()=>{clearEmail();const input=$('#leads-login [name="email"]');if(input){input.value='';input.focus();}},
 'clear-selection':()=>{selected.clear();render();},
 'delete-selected':()=>confirmDelete([...selected]),
 'edit-all':()=>openDrawer(view.id),
@@ -472,6 +482,7 @@ $('#leads-view').addEventListener('submit',async e=>{
   const form=e.target;
   leadLoginError='';
   const { error }=await window.GenieAuth.signIn(form.elements.email.value.trim(),form.elements.password.value);
+  if (!error && window.GenieAuth.getState().status === 'member') rememberEmail(window.GenieAuth.getState().email);
   if (error && window.GenieAuth.getState().status === 'signedOut') {
     leadLoginError=error;
     renderLeads();

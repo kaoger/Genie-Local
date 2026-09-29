@@ -28,12 +28,18 @@ const test = base.extend({
       if (url.pathname === '/rest/v1/app_admins') {
         return route.fulfill({ status: 200, headers, body: JSON.stringify(api.member ? [api.member] : []) });
       }
+      if (url.pathname === '/rest/v1/customer_leads') {
+        return route.fulfill({ status: 200, headers, body: '[]' });
+      }
       if (url.pathname === '/auth/v1/logout') return route.fulfill({ status: 204, headers });
       return route.fulfill({ status: 500, headers, body: JSON.stringify({ error: `Unexpected ${url.pathname}` }) });
     });
     await page.goto('/');
     await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
     await page.reload();
+    // 本機 webServer 剛啟動時，首次載入偶爾會拒絕靜態 JS 請求。
+    if (!await page.locator('#rows tr[data-id]').count()) await page.reload();
+    await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
     await use(api);
     for (const request of api.requests.filter(r => r.method !== 'OPTIONS')) {
       expect(request.headers.apikey, request.path).toBe(KEY);
@@ -77,7 +83,7 @@ test('成員可登入、重新整理保持登入，登出清除本機 session', 
   await openLeads(page);
   await login(page);
   await expect(page.locator('.leads-account')).toContainText('測試成員');
-  await expect(page.locator('#leads-view')).toContainText('客戶名單（Step C 製作中）');
+  await expect(page.locator('#leads-view')).toContainText('目前沒有待聯絡的客戶');
   expect(await authStorage(page)).toHaveLength(1);
   await page.reload();
   await expect(page.locator('.leads-account')).toContainText('測試成員');
