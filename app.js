@@ -94,6 +94,7 @@ const findProject=id=>projects.find(p=>p.id===id);
 
 /* ================= 通知 ================= */
 function toast(message,{actionLabel='',onAction=null,duration=5000}={}){clearTimeout(toastTimer);$('#toast-text').innerHTML=esc(message);toastAction=onAction;$('#toast-action').innerHTML=esc(actionLabel);$('#toast-action').hidden=!actionLabel;$('#toast').hidden=false;toastTimer=setTimeout(()=>$('#toast').hidden=true,duration);}
+window.GenieToast=toast;
 
 /* ================= 欄位值與完成依據 ================= */
 const getVal=(p,f)=>f.top?p[f.key]:p.brief?.[f.key];
@@ -382,7 +383,7 @@ function renderLeads() {
   else if (status === 'member') {
     head += `<div class="leads-account"><span>${esc(displayName || email)}</span><span aria-hidden="true">・</span><button type="button" data-action="lead-signout">登出</button></div>`;
     head += '<button type="button" class="lead-refresh" data-action="lead-refresh">重新整理</button>';
-    body = '<div id="leads-list" class="leads-list"><section aria-labelledby="pending-title"><h2 id="pending-title">待聯絡</h2><div data-lead-section="pending"></div></section><section aria-labelledby="contacted-title"><h2 id="contacted-title">已聯絡</h2><div data-lead-section="contacted"></div></section></div>';
+    body = '<div id="leads-list" class="leads-list"><section aria-labelledby="pending-title"><h2 id="pending-title">待聯絡</h2><div data-lead-section="pending"></div></section><section aria-labelledby="contacted-title"><h2 id="contacted-title">已回報</h2><div data-lead-section="contacted"></div></section></div>';
   } else body = `<div class="auth-card"><h2>登入客戶名單</h2><form id="leads-login"><label>信箱<input type="email" name="email" autocomplete="username" value="${esc(lastEmail())}" required></label><button type="button" class="auth-switch" data-action="lead-clear-email">不是這個帳號？</button><label>密碼<input type="password" name="password" autocomplete="current-password" required></label><p id="leads-error" class="auth-error" role="alert">${esc(leadLoginError)}</p><button class="primary" type="submit">登入</button></form><p class="muted">忘記密碼？請聯絡管理者重設</p></div>`;
   $('#leads-view').innerHTML = `<header class="leads-header">${head}</header><section class="leads-content">${body}</section>`;
   if (status === 'member') window.GenieLeads.activate();
