@@ -1,5 +1,6 @@
 'use strict';
 const { test: base, expect } = require('@playwright/test');
+const { installMember } = require('./mock-auth');
 
 const STORAGE_KEY = 'genie-local-projects-v1';
 const STEPS = ['brief', 'strategy', 'visual', 'model3d', 'estimate', 'proposal'];
@@ -16,6 +17,7 @@ const test = base.extend({
     await use(errors);
   }, { auto: true }],
   cleanStorage: [async ({ page, browserErrors }, use) => {
+    await installMember(page);
     await page.goto('/');
     await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
     await use();

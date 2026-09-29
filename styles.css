@@ -180,6 +180,17 @@ main,#list-view,#detail-view,.detail-body,.card{min-width:0}
 @media(max-width:600px){.leads-header h1{flex:1 1 100%}.leads-account{flex:1}.lead-cards{grid-template-columns:1fr}.lead-card{padding:16px}.lead-fields{gap:10px}}
 .table-scroll>table{min-width:1100px}
 #rows td:nth-child(6),#rows td:nth-child(7){white-space:normal;overflow-wrap:anywhere}
+.seed-badge{margin:0 0 0 8px;white-space:nowrap}
+.auth-shell{min-height:100dvh;display:grid;place-items:center;padding:24px;background:var(--canvas);color:#333}
+.auth-shell>p{font-size:16px}
+.auth-shell .auth-card{width:min(100%,420px)}
+.offline-banner{position:fixed;z-index:20;top:0;left:73px;right:0;display:flex;align-items:center;justify-content:center;gap:12px;min-height:40px;padding:6px 12px;background:#fff3cd;color:#604500;border-bottom:1px solid #e9cf83}
+.offline-banner button{border:1px solid #bd9b48;padding:4px 10px}
+body:has(.offline-banner:not([hidden])) main{padding-top:40px}
+.sidebar-bottom{margin-top:auto;margin-bottom:18px;display:grid;justify-items:center;gap:8px}
+.sidebar-bottom .help-button{position:static}
+.sidebar-bottom [data-action="signout"]{font-size:12px;padding:6px 4px}
+@media(max-width:600px){.offline-banner{left:57px;font-size:12px}}
 button.primary:disabled,button.primary:disabled:hover{background:#62666b;color:#fff;border-color:#62666b;opacity:1;cursor:not-allowed}
 button:disabled{opacity:.55}
 .status-bar{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 20px;border:1px solid #d6dbe0;border-radius:10px;background:#fff;color:#343b43}

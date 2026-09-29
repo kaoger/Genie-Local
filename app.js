@@ -198,7 +198,7 @@ function current(){return projects.slice(page*pageSize,(page+1)*pageSize);}
 function render(){
 page=Math.max(0,Math.min(page,Math.ceil(projects.length/pageSize)-1));
 const rows=current();
-$('#rows').innerHTML=rows.map(p=>`<tr data-id="${esc(p.id)}" class="${selected.has(p.id)?'selected':''}"><td><input type="checkbox" data-select="${esc(p.id)}" aria-label="選取專案 ${esc(p.name)}" ${selected.has(p.id)?'checked':''}></td><td><a class="project-name" href="${projectHref(p,'brief')}" title="開啟專案">${esc(p.name)}</a></td><td>${esc(p.contact)}</td><td>${esc(dateText(p.date))}</td><td><span class="type-tag">${esc(p.type)}</span></td><td>${esc(p.email)}</td><td>${esc(p.phone)}</td><td>${esc(dateText(p.due))}</td><td>${esc(sourceLabel(p))}</td><td>${currentStep(p)}</td><td><div class="row-actions"><button data-copy="${esc(p.id)}" aria-label="複製 ${esc(p.name)}" title="複製專案">${icon('copy')}</button><button data-delete="${esc(p.id)}" aria-label="刪除 ${esc(p.name)}" title="刪除專案">${icon('trash')}</button></div></td></tr>`).join('')+`<tr class="example-row"><td></td><td><span class="example-badge">範例</span><span class="example-name">示範品牌 / Demo Brand</span></td><td>示範聯絡人</td><td>2024/11/27</td><td><span class="type-tag">品牌設計</span></td><td>info@example.com</td><td></td><td>2025/01/31</td><td>—</td><td>—</td><td></td></tr>`;
+$('#rows').innerHTML=rows.map(p=>`<tr data-id="${esc(p.id)}" class="${selected.has(p.id)?'selected':''}"><td><input type="checkbox" data-select="${esc(p.id)}" aria-label="選取專案 ${esc(p.name)}" ${selected.has(p.id)?'checked':''}></td><td><a class="project-name" href="${projectHref(p,'brief')}" title="開啟專案">${esc(p.name)}</a>${p.id.startsWith('sample-')?'<span class="example-badge seed-badge">示範</span>':''}</td><td>${esc(p.contact)}</td><td>${esc(dateText(p.date))}</td><td><span class="type-tag">${esc(p.type)}</span></td><td>${esc(p.email)}</td><td>${esc(p.phone)}</td><td>${esc(dateText(p.due))}</td><td>${esc(sourceLabel(p))}</td><td>${currentStep(p)}</td><td><div class="row-actions"><button data-copy="${esc(p.id)}" aria-label="複製 ${esc(p.name)}" title="複製專案">${icon('copy')}</button><button data-delete="${esc(p.id)}" aria-label="刪除 ${esc(p.name)}" title="刪除專案">${icon('trash')}</button></div></td></tr>`).join('')+`<tr class="example-row"><td></td><td><span class="example-badge">範例</span><span class="example-name">示範品牌 / Demo Brand</span></td><td>示範聯絡人</td><td>2024/11/27</td><td><span class="type-tag">品牌設計</span></td><td>info@example.com</td><td></td><td>2025/01/31</td><td>—</td><td>—</td><td></td></tr>`;
 const all=$('#select-all');all.checked=rows.length>0&&rows.every(p=>selected.has(p.id));all.indeterminate=rows.some(p=>selected.has(p.id))&&!all.checked;all.disabled=!rows.length;
 $('.selection-bar').hidden=!selected.size;$('#selected-count').textContent=`已選取 ${selected.size} 個專案`;
 const total=Math.max(1,Math.ceil(projects.length/pageSize));$('#prev').disabled=page===0;$('#next').disabled=page>=total-1;
@@ -375,23 +375,25 @@ function lastEmail() { try { return localStorage.getItem(lastEmailKey) || ''; } 
 function rememberEmail(email) { try { localStorage.setItem(lastEmailKey, email); } catch {} }
 function clearEmail() { try { localStorage.removeItem(lastEmailKey); } catch {} }
 function renderLeads() {
-  if (location.hash !== '#/leads') return;
+  if (location.hash !== '#/leads' || !canUseWorkspace()) return;
   const { status, displayName, email } = window.GenieAuth.getState();
   let head = '<h1>客戶名單</h1>', body = '';
-  if (status === 'checking') body = '<div class="auth-card" role="status">正在檢查登入狀態…</div>';
-  else if (status === 'denied') body = '<div class="auth-card"><h2>此帳號沒有權限，請聯絡管理者</h2><button type="button" class="primary" data-action="lead-switch">換個帳號登入</button></div>';
-  else if (status === 'member') {
+  if (status === 'member' || status === 'offline') {
     head += `<div class="leads-account"><span>${esc(displayName || email)}</span><span aria-hidden="true">・</span><button type="button" data-action="lead-signout">登出</button></div>`;
     head += '<button type="button" class="lead-refresh" data-action="lead-refresh">重新整理</button>';
     body = '<div id="leads-list" class="leads-list"><section aria-labelledby="pending-title"><h2 id="pending-title">待聯絡</h2><div data-lead-section="pending"></div></section><section aria-labelledby="contacted-title"><h2 id="contacted-title">已回報</h2><div data-lead-section="contacted"></div></section></div>';
-  } else body = `<div class="auth-card"><h2>登入客戶名單</h2><form id="leads-login" method="post"><label>信箱<input type="email" name="email" autocomplete="username" value="${esc(lastEmail())}" required></label><button type="button" class="auth-switch" data-action="lead-clear-email">不是這個帳號？</button><label>密碼<input type="password" name="password" autocomplete="current-password" required></label><p id="leads-error" class="auth-error" role="alert">${esc(leadLoginError)}</p><button class="primary" type="submit">登入</button></form><p class="muted">忘記密碼？請聯絡管理者重設</p></div>`;
+  }
   $('#leads-view').innerHTML = `<header class="leads-header">${head}</header><section class="leads-content">${body}</section>`;
   if (status === 'member') window.GenieLeads.activate();
-  else window.GenieLeads.deactivate();
+  else {
+    window.GenieLeads.activate();
+    window.GenieLeads.showOffline();
+  }
 }
 
 /* ================= 頁面切換（網址 #/p/專案/步驟、#/leads） ================= */
 function route(){
+  if (!canUseWorkspace()) return;
   const leads = location.hash === '#/leads';
   $('#leads-view').hidden = !leads;
   document.querySelector('[data-action="leads"]').setAttribute('aria-current', leads ? 'page' : 'false');
@@ -413,11 +415,65 @@ function route(){
   $('main').scrollTop=0;
 }
 
+/* ================= 全站登入殼層 ================= */
+let workspaceVisible = false;
+let lastAuthStatus = '';
+const canUseWorkspace = () => {
+  const auth = window.GenieAuth.getState();
+  return auth.status === 'member' || (auth.status === 'offline' && auth.localAccess);
+};
+function hideWorkspace() {
+  workspaceVisible = false;
+  $('.sidebar').hidden = true;
+  $('main').hidden = true;
+  $('#offline-banner').hidden = true;
+  window.GenieLeads.deactivate();
+  document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+  dirty = false;
+  clearTimeout(toastTimer);
+  toastAction = null;
+  $('#toast').hidden = true;
+  $('#rows').innerHTML = '';
+  $('#detail-view').innerHTML = '';
+  $('#leads-view').innerHTML = '';
+  document.title = 'Genie-Local';
+}
+function showAuth(auth) {
+  if (canUseWorkspace()) {
+    $('#auth-shell').hidden = true;
+    $('.sidebar').hidden = false;
+    $('main').hidden = false;
+    $('#offline-banner').hidden = auth.status !== 'offline';
+    if (!workspaceVisible) { workspaceVisible = true; route(); if (storageWarning) toast('無法讀取先前資料，目前顯示示範內容。',{duration:10000}); }
+    else if (location.hash === '#/leads' && lastAuthStatus !== auth.status) {
+      if (auth.status === 'member') window.GenieLeads.refresh();
+      else window.GenieLeads.showOffline();
+    }
+    lastAuthStatus = auth.status;
+    return;
+  }
+  lastAuthStatus = auth.status;
+  hideWorkspace();
+  $('#auth-shell').hidden = false;
+  if (auth.status === 'checking') {
+    $('#auth-shell').innerHTML = '<p>正在檢查登入狀態…</p>';
+  } else if (auth.status === 'offline') {
+    $('#auth-shell').innerHTML = '<div class="auth-card"><h2>無法連線，請稍後再試</h2><button type="button" class="primary" data-action="auth-retry">重試</button></div>';
+  } else if (auth.status === 'denied') {
+    $('#auth-shell').innerHTML = '<div class="auth-card"><h2>此帳號沒有權限，請聯絡管理者</h2><button type="button" class="primary" data-action="lead-switch">換個帳號登入</button></div>';
+  } else if (!$('#leads-login')) {
+    $('#auth-shell').innerHTML = `<div class="auth-card"><h2>登入 Genie-Local</h2><form id="leads-login" method="post"><label>信箱<input type="email" name="email" autocomplete="username" value="${esc(lastEmail())}" required></label><button type="button" class="auth-switch" data-action="lead-clear-email">不是這個帳號？</button><label>密碼<input type="password" name="password" autocomplete="current-password" required></label><p id="leads-error" class="auth-error" role="alert">${esc(leadLoginError)}</p><button class="primary" type="submit">登入</button></form><p class="muted">忘記密碼？請聯絡管理者重設</p></div>`;
+  }
+  document.title = auth.status === 'signedOut' || auth.status === 'denied' ? '登入 Genie-Local' : 'Genie-Local';
+}
+
 /* ================= 其他對話框 ================= */
 function showInfo(title,body){$('#info-title').innerHTML=esc(title);$('#info-body').innerHTML=body;$('#info-dialog').showModal();}
 const actions={
 add:()=>openCreate(),home:()=>{if(location.hash&&location.hash!=='#/')location.hash='#/';else{page=0;render();$('main').scrollTop=0;}},
 leads:()=>{location.hash='#/leads';},
+'signout':()=>{leadLoginError='';window.GenieAuth.signOut();},
+'auth-retry':()=>window.GenieAuth.retry(),
 'lead-switch':()=>{leadLoginError='';window.GenieAuth.signOut();},
 'lead-signout':()=>{leadLoginError='';window.GenieAuth.signOut();},
 'lead-refresh':()=>window.GenieLeads.refresh(),
@@ -441,8 +497,8 @@ uncomplete:()=>{const p=findProject(view.id);if(commit(()=>delete p.steps[view.s
 'meeting-edit':()=>{if(saveMeeting())openDrawer(view.id,{section:sectionsFor(findProject(view.id).type)[1].id});},
 'est-add':()=>changeEstimate(e=>e.rows.push({id:crypto.randomUUID(),item:'',qty:'',unit:'',price:''})),
 knowledge:()=>{let notes='';try{notes=localStorage.getItem('genie-local-notes')||'';}catch{}showInfo('知識庫',`<p class="muted">整理你的常用問答與專案需求，保存在這台瀏覽器。</p><form id="notes-form"><label>工作筆記<textarea name="knowledge" rows="10" maxlength="30000" placeholder="例如：第一次洽談需要確認的事項…">${esc(notes)}</textarea></label><div class="dialog-footer"><button type="submit" class="primary">儲存筆記</button></div></form>`);},
-account:()=>{let name='';try{name=localStorage.getItem('genie-local-name')||'';}catch{}showInfo('個人設定',`<div class="account-avatar"></div><form id="account-form"><label>顯示名稱<input name="displayName" maxlength="60" value="${esc(name)}" placeholder="你的名字"></label><p class="muted">本機示範版本，無需登入。資料保存在目前的瀏覽器。</p><div class="dialog-footer"><button class="primary" type="submit">儲存設定</button></div></form>`);},
-help:()=>showInfo('Genie-Local v4 使用說明','<p>六個步驟都能隨時打開查看，條件只限制生成與確認。</p><ol><li>需求總覽：選擇需求來源，補齊「必填」後按「確認需求」。會議記錄不會自動改寫欄位；客戶送出是手動登錄。</li><li>策略企劃：確認需求後生成示範摘要，檢查後「標記完成」；重新生成保留上一版。</li><li>視覺發想與 3D：在其他工具完成後回來標記，或設為「本案不採用」。品牌、包裝、網站本版不提供 3D。</li><li>業務估價：填明細、稅別、有效期限與報價範圍，確認需求後才能標記完成。修改數量會解除坪數連動，可按「改回沿用」。</li><li>提案簡報：預覽所有採用的段落，引用步驟都完成後才能標記完成；尚無正式匯出。</li></ol><p>狀態：缺資料／可開始／已完成／需更新／不適用。修改需求或成果後會比對完成依據，顯示更新原因；電話與備註不影響狀態。</p><ul><li>表單支援類型切換保留草稿、Ctrl＋S 儲存、未儲存關閉提醒。</li><li>勾選可批次刪除，10 秒內可復原整批；連續刪除也會一併復原。</li><li>左側對話圖示可匯出 JSON 備份，目前不提供匯入。</li></ul><p class="muted">本機專案存在這台瀏覽器；「客戶名單」需要登入，資料來自雲端資料庫（Messenger 表單）。共用或借用裝置時，用完請按登出。清除瀏覽器資料會移除本機記錄。</p>'),
+account:()=>{let name='';try{name=localStorage.getItem('genie-local-name')||'';}catch{}const auth=window.GenieAuth.getState();showInfo('個人設定',`<div class="account-avatar"></div><p>登入身分：${esc(auth.displayName || auth.email)}</p><form id="account-form"><label>本機顯示名稱<input name="displayName" maxlength="60" value="${esc(name)}" placeholder="你的名字"></label><p class="muted">本機顯示名稱只存在這台瀏覽器，與登入身分分開。全站需登入；本機專案存在這台瀏覽器。共用裝置用完請登出。</p><div class="dialog-footer"><button class="primary" type="submit">儲存設定</button></div></form>`);},
+help:()=>showInfo('Genie-Local v4 使用說明','<p>六個步驟都能隨時打開查看，條件只限制生成與確認。</p><ol><li>需求總覽：選擇需求來源，補齊「必填」後按「確認需求」。會議記錄不會自動改寫欄位；客戶送出是手動登錄。</li><li>策略企劃：確認需求後生成示範摘要，檢查後「標記完成」；重新生成保留上一版。</li><li>視覺發想與 3D：在其他工具完成後回來標記，或設為「本案不採用」。品牌、包裝、網站本版不提供 3D。</li><li>業務估價：填明細、稅別、有效期限與報價範圍，確認需求後才能標記完成。修改數量會解除坪數連動，可按「改回沿用」。</li><li>提案簡報：預覽所有採用的段落，引用步驟都完成後才能標記完成；尚無正式匯出。</li></ol><p>狀態：缺資料／可開始／已完成／需更新／不適用。修改需求或成果後會比對完成依據，顯示更新原因；電話與備註不影響狀態。</p><ul><li>表單支援類型切換保留草稿、Ctrl＋S 儲存、未儲存關閉提醒。</li><li>勾選可批次刪除，10 秒內可復原整批；連續刪除也會一併復原。</li><li>左側對話圖示可匯出 JSON 備份，目前不提供匯入。</li></ul><p class="muted">全站需登入。本機專案存在這台瀏覽器；「客戶名單」資料來自雲端資料庫（Messenger 表單）。共用或借用裝置時，用完請按登出。清除瀏覽器資料會移除本機記錄。</p>'),
 export:()=>{let notes='',name='';try{notes=localStorage.getItem('genie-local-notes')||'';name=localStorage.getItem('genie-local-name')||'';}catch{}const blob=new Blob([JSON.stringify({version:3,projects,notes,displayName:name},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='客戶資料備份.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('已匯出本機資料');}
 };
 
@@ -462,6 +518,7 @@ function undoDelete(){
 /* ================= 事件 ================= */
 document.addEventListener('click',e=>{
 const b=e.target.closest('button');if(!b)return;
+if (!canUseWorkspace() && !b.closest('#auth-shell')) return;
 if(b.hasAttribute('data-close'))return b.closest('dialog').close();
 if(b.hasAttribute('data-drawer-close'))return closeDrawer();
 if(b.dataset.jump){$(`#sec-${b.dataset.jump}`)?.scrollIntoView({block:'start',behavior:'smooth'});return;}
@@ -476,17 +533,18 @@ if(b.dataset.copy){const p=findProject(b.dataset.copy);if(commit(()=>projects.un
 if(b.dataset.delete)confirmDelete([b.dataset.delete]);
 if(b.dataset.page!==undefined){page=Number(b.dataset.page);render();$('main').scrollTop=0;}
 });
-$('#detail-view').addEventListener('submit',e=>{e.preventDefault();if(e.target.id==='meeting-form'&&saveMeeting())toast('會議記錄已儲存');});
-$('#leads-view').addEventListener('submit',async e=>{
+$('#detail-view').addEventListener('submit',e=>{e.preventDefault();if(!canUseWorkspace())return;if(e.target.id==='meeting-form'&&saveMeeting())toast('會議記錄已儲存');});
+$('#auth-shell').addEventListener('submit',async e=>{
   if (e.target.id !== 'leads-login') return;
   e.preventDefault();
   const form=e.target;
+  const email=form.elements.email.value.trim(), password=form.elements.password.value;
   leadLoginError='';
-  const { error }=await window.GenieAuth.signIn(form.elements.email.value.trim(),form.elements.password.value);
+  const { error }=await window.GenieAuth.signIn(email,password);
   if (!error && window.GenieAuth.getState().status === 'member') rememberEmail(window.GenieAuth.getState().email);
   if (error && window.GenieAuth.getState().status === 'signedOut') {
     leadLoginError=error;
-    renderLeads();
+    const message=$('#leads-error');if(message)message.textContent=error;
   }
 });
 $('#detail-view').addEventListener('input',e=>{if(e.target.matches('[data-est-field],[data-est-condition]'))estimateEdit(e.target,false);});
@@ -523,7 +581,13 @@ $('#toast-action').addEventListener('click',()=>{const fn=toastAction;$('#toast'
 $('#dismiss-toast').addEventListener('click',()=>{$('#toast').hidden=true;clearTimeout(toastTimer);});
 $('#prev').addEventListener('click',()=>{page--;render();$('main').scrollTop=0;});$('#next').addEventListener('click',()=>{page++;render();$('main').scrollTop=0;});
 $('#info-dialog').addEventListener('submit',e=>{e.preventDefault();try{if(e.target.id==='notes-form')localStorage.setItem('genie-local-notes',e.target.elements.knowledge.value);if(e.target.id==='account-form')localStorage.setItem('genie-local-name',e.target.elements.displayName.value);$('#info-dialog').close();toast('已儲存');}catch{toast('瀏覽器無法儲存，請確認儲存空間與隱私設定。');}});
+for (const eventName of ['click','submit','change','input','keydown']) {
+  document.addEventListener(eventName,e=>{
+    if (canUseWorkspace() || e.target.closest?.('#auth-shell')) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  },true);
+}
 window.addEventListener('hashchange',route);
-window.GenieAuth.subscribe(renderLeads);
-route();if(storageWarning)toast('無法讀取先前資料，目前顯示示範內容。',{duration:10000});
+window.GenieAuth.subscribe(showAuth);
 })();

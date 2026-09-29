@@ -67,16 +67,17 @@ const test = base.extend({
       return route.fulfill({ status: 500, headers, body: '{}' });
     });
     await page.goto('/');
-    await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
+    await expect(page.locator('#leads-login')).toBeVisible();
     await use(api);
   }, { auto: true }],
 });
 
 async function login(page) {
-  await page.getByRole('button', { name: '客戶名單', exact: true }).click();
   await page.locator('#leads-login [name="email"]').fill(email);
   await page.locator('#leads-login [name="password"]').fill('test-password');
   await page.locator('#leads-login button[type="submit"]').click();
+  await expect(page.locator('#list-view')).toBeVisible();
+  await page.getByRole('button', { name: '客戶名單', exact: true }).click();
   await expect(page.locator('#leads-list')).toBeVisible();
 }
 
@@ -141,7 +142,7 @@ test('成功登入後記住信箱，登出後可清除，密碼不入 localStora
   await login(page);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('genie-last-email'))).toBe(email);
   expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain('test-password');
-  await page.getByRole('button', { name: '登出', exact: true }).click();
+  await page.locator('#leads-view').getByRole('button', { name: '登出', exact: true }).click();
   await expect(page.locator('#leads-login [name="email"]')).toHaveValue(email);
   await page.getByRole('button', { name: '不是這個帳號？' }).click();
   await expect(page.locator('#leads-login [name="email"]')).toHaveValue('');
@@ -149,11 +150,10 @@ test('成功登入後記住信箱，登出後可清除，密碼不入 localStora
 });
 
 test('JWT 失效續期仍失敗時回到登入畫面', async ({ page, api }) => {
+  await login(page);
+  await expect(page.locator('#leads-list')).toContainText('目前沒有待聯絡的客戶');
   api.unauthorized = true;
-  await page.getByRole('button', { name: '客戶名單', exact: true }).click();
-  await page.locator('#leads-login [name="email"]').fill(email);
-  await page.locator('#leads-login [name="password"]').fill('test-password');
-  await page.locator('#leads-login button[type="submit"]').click();
+  await page.evaluate(() => window.GenieLeads.refresh());
   await expect(page.locator('#leads-login')).toBeVisible();
   expect(api.refreshes).toBeGreaterThan(0);
 });
@@ -227,6 +227,7 @@ test('Messenger 只對數字 ID 顯示，開收件匣並複製姓名', async ({ 
 test('寫入時 401 續期後重試，仍失敗則返回登入', async ({ page, api }) => {
   api.rows = [lead('retry')];
   await login(page);
+  await expect(page.locator('[data-lead-section="contacted"]')).toContainText('還沒有已回報的客戶');
   api.unauthorized = 1;
   await page.locator('[data-lead-id="retry"]').getByRole('button', { name: '聯絡不上' }).click();
   await expect(page.locator('[data-lead-section="contacted"] .lead-card')).toHaveCount(1);

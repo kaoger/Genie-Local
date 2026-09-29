@@ -16,7 +16,10 @@ let root = null;
 const saving = new Set();
 let undoTimer;
 
-function active() { return location.hash === '#/leads' && window.GenieAuth.getState().status === 'member' && root?.isConnected; }
+function active() {
+  const auth = window.GenieAuth.getState();
+  return location.hash === '#/leads' && (auth.status === 'member' || (auth.status === 'offline' && auth.localAccess)) && root?.isConnected;
+}
 function relative(value) {
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return '—';
@@ -91,7 +94,7 @@ async function query(kind, offset) {
   return response;
 }
 async function load(kind) {
-  if (!active()) return;
+  if (!active() || window.GenieAuth.getState().status !== 'member') return;
   const state = lists[kind];
   if (state.loading || !state.more) return;
   const current = epoch, offset = state.items.length;
@@ -116,7 +119,14 @@ function refresh() {
   if (!active()) return;
   ++epoch;
   lists = Object.fromEntries(Object.keys(sections).map(kind => [kind, { items: [], more: true, loading: false, error: false }]));
+  if (window.GenieAuth.getState().status === 'offline') { showOffline(); return; }
   Object.keys(sections).forEach(kind => { render(kind); load(kind); });
+}
+function showOffline() {
+  if (!active()) return;
+  ++epoch;
+  lists = Object.fromEntries(Object.keys(sections).map(kind => [kind, { items: [], more: false, loading: false, error: true }]));
+  Object.keys(sections).forEach(render);
 }
 function activate() {
   root = $('#leads-list');
@@ -229,5 +239,5 @@ $('#leads-view').addEventListener('click', event => {
   if (kind && sections[kind]) load(kind);
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-window.GenieLeads = { activate, deactivate, refresh };
+window.GenieLeads = { activate, deactivate, refresh, showOffline };
 })();
