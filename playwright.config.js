@@ -4,7 +4,8 @@ const { defineConfig } = require('@playwright/test');
 module.exports = defineConfig({
   testDir: 'tests',
   fullyParallel: true,
-  workers: 2,
+  // Python http.server 在 Windows 遇到並行的多頁面靜態檔請求時曾拒絕 app.js 連線。
+  workers: 1,
   retries: 0,
   reporter: 'list',
   use: {

@@ -4,7 +4,7 @@ const { test: base, expect } = require('@playwright/test');
 const STORAGE_KEY = 'genie-local-projects-v1';
 const STEPS = ['brief', 'strategy', 'visual', 'model3d', 'estimate', 'proposal'];
 
-// 每個案例有獨立的 browser context；取得網站 origin 後清空資料並重新載入。
+// 每個案例有獨立的 browser context，localStorage 與 sessionStorage 一開始均為空。
 // 自動 fixture 確保每個 spec 都初始化，錯誤監聽涵蓋首次載入與整段操作。
 const test = base.extend({
   browserErrors: [async ({ page }, use) => {
@@ -17,9 +17,7 @@ const test = base.extend({
   }, { auto: true }],
   cleanStorage: [async ({ page, browserErrors }, use) => {
     await page.goto('/');
-    await page.evaluate(() => localStorage.clear());
-    await page.reload();
-    await expect(page.locator('#list-view')).toBeVisible();
+    await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
     await use();
   }, { auto: true }],
 });

@@ -60,9 +60,6 @@ const test = base.extend({
       return route.fulfill({ status: 500, headers, body: '{}' });
     });
     await page.goto('/');
-    await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
-    await page.reload();
-    if (!await page.locator('#rows tr[data-id]').count()) await page.reload();
     await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
     await use(api);
   }, { auto: true }],

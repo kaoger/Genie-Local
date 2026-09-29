@@ -57,5 +57,6 @@ test('驗收 12：批次刪除兩筆後，整批復原且順序不變', async ({
   expect(await rows.evaluateAll(elements => elements.map(el => el.dataset.id))).toEqual(before);
   expect((await storedProjects(page)).map(p => p.id)).toEqual(before);
   await page.reload();
+  await expect(rows).toHaveCount(8);
   expect(await rows.evaluateAll(elements => elements.map(el => el.dataset.id))).toEqual(before);
 });

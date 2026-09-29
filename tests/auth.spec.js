@@ -35,10 +35,6 @@ const test = base.extend({
       return route.fulfill({ status: 500, headers, body: JSON.stringify({ error: `Unexpected ${url.pathname}` }) });
     });
     await page.goto('/');
-    await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
-    await page.reload();
-    // 本機 webServer 剛啟動時，首次載入偶爾會拒絕靜態 JS 請求。
-    if (!await page.locator('#rows tr[data-id]').count()) await page.reload();
     await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
     await use(api);
     for (const request of api.requests.filter(r => r.method !== 'OPTIONS')) {
