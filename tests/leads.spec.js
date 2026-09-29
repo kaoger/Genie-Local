@@ -9,18 +9,25 @@ const lead = (id, extra = {}) => ({ id, status: 'complete', answers: { contact_t
 
 const test = base.extend({
   api: [async ({ page }, use) => {
-    const api = { rows: [], requests: [], patches: [], rpcs: [], rpcResult: 'undone', fail: false, patchStatus: 200, unauthorized: false, refreshes: 0 };
+    const api = { rows: [], requests: [], patches: [], rpcs: [], rpcResult: 'undone', rpcUnauthorized: false, fail: false, patchStatus: 200, unauthorized: false, refreshes: 0, refreshFails: false };
     await page.route('https://llqwzrgzekalwdnetvyb.supabase.co/**', async route => {
       const request = route.request(), url = new URL(request.url());
       const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'content-type': 'application/json' };
       if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
       if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'password') return route.fulfill({ status: 200, headers, body: JSON.stringify(session()) });
-      if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'refresh_token') { api.refreshes++; return route.fulfill({ status: 200, headers, body: JSON.stringify(session()) }); }
+      if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'refresh_token') {
+        api.refreshes++;
+        return route.fulfill({ status: api.refreshFails ? 400 : 200, headers, body: JSON.stringify(api.refreshFails ? { error: 'invalid_grant', error_description: 'Refresh token expired' } : session()) });
+      }
       if (url.pathname === '/auth/v1/logout') return route.fulfill({ status: 204, headers });
       if (url.pathname === '/rest/v1/app_admins') return route.fulfill({ status: 200, headers, body: '[{"display_name":"測試成員","active":true}]' });
       if (url.pathname === '/rest/v1/rpc/genie_undo_contact_result') {
         const body = JSON.parse(request.postData());
         api.rpcs.push(body);
+        if (api.rpcUnauthorized === true || api.rpcUnauthorized > 0) {
+          if (typeof api.rpcUnauthorized === 'number') api.rpcUnauthorized--;
+          return route.fulfill({ status: 401, headers, body: '{"code":"PGRST301","message":"JWT expired"}' });
+        }
         if (api.rpcResult === 'undone') {
           const row = api.rows.find(item => item.id === body.p_id);
           if (row) { row.contact_result = null; row.contact_result_at = null; row.contact_undo_until = null; }
@@ -270,6 +277,28 @@ test('記錄成功的 toast 收回捷徑呼叫 RPC 並移回待聯絡', async ({
   await expect(page.locator('[data-lead-section="pending"] [data-lead-id="shortcut"]')).toBeVisible();
   expect(api.rpcs).toHaveLength(1);
   expect(api.rpcs[0]).toEqual({ p_id: 'shortcut', p_expected_result: 'site_visit', p_expected_at: expect.any(String) });
+});
+
+test('收回遇 401 時續期成功並重試 RPC', async ({ page, api }) => {
+  const at = new Date().toISOString();
+  api.rows = [lead('undo-retry', { contact_result: 'contacted', contact_result_at: at, contact_undo_until: new Date(Date.now() + 14 * 60000).toISOString() })];
+  await login(page);
+  api.rpcUnauthorized = 1;
+  await page.locator('[data-lead-id="undo-retry"] [data-lead-undo]').click();
+  await expect(page.locator('[data-lead-section="pending"] [data-lead-id="undo-retry"]')).toBeVisible();
+  expect(api.refreshes).toBe(1);
+  expect(api.rpcs).toEqual(Array(2).fill({ p_id: 'undo-retry', p_expected_result: 'contacted', p_expected_at: at }));
+});
+
+test('收回遇 401 且續期失敗時登出並回登入畫面', async ({ page, api }) => {
+  api.rows = [lead('undo-expired', { contact_result: 'contacted', contact_result_at: new Date().toISOString(), contact_undo_until: new Date(Date.now() + 14 * 60000).toISOString() })];
+  await login(page);
+  api.rpcUnauthorized = true;
+  api.refreshFails = true;
+  await page.locator('[data-lead-id="undo-expired"] [data-lead-undo]').click();
+  await expect(page.locator('#leads-login')).toBeVisible();
+  expect(api.refreshes).toBe(1);
+  expect(api.rpcs).toHaveLength(1);
 });
 
 test('收回期限到時，卡片按鈕自動消失', async ({ page, api }) => {

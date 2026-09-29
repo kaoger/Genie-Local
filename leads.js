@@ -183,7 +183,15 @@ async function undoResult(lead) {
   });
   const current = epoch;
   try {
-    const response = await window.GenieAuth.getClient().rpc('genie_undo_contact_result', { p_id: lead.id, p_expected_result: lead.contact_result, p_expected_at: lead.contact_result_at });
+    const client = window.GenieAuth.getClient();
+    const run = () => client.rpc('genie_undo_contact_result', { p_id: lead.id, p_expected_result: lead.contact_result, p_expected_at: lead.contact_result_at });
+    let response = await run();
+    if (response.status === 401) {
+      const refreshed = await client.auth.refreshSession();
+      if (refreshed.error || !refreshed.data?.session) { await window.GenieAuth.signOut(); return; }
+      response = await run();
+      if (response.status === 401) { await window.GenieAuth.signOut(); return; }
+    }
     if (current !== epoch || !active()) return;
     if (response.error) { notice('收回失敗，請稍後再試'); return; }
     if (response.data === 'undone') { refresh(); notice('已改回待聯絡'); }

@@ -62,9 +62,33 @@ test('本機首頁無須登入；客戶名單顯示登入畫面', async ({ page 
   await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
   await openLeads(page);
   await expect(page.locator('#leads-login')).toBeVisible();
+  await expect(page.locator('#leads-login')).toHaveAttribute('method', 'post');
   await expect(page.locator('#leads-login [name="email"]')).toHaveAttribute('autocomplete', 'username');
   await expect(page.locator('#leads-login [name="password"]')).toHaveAttribute('autocomplete', 'current-password');
   await expect(page.locator('#leads-view')).toContainText('忘記密碼？請聯絡管理者重設');
+});
+
+for (const [name, url] of [
+  ['網址片段 token', '/#access_token=link-access-token&refresh_token=link-refresh-token&expires_in=3600&token_type=bearer'],
+  ['網址查詢 code', '/?code=link-auth-code'],
+]) {
+  test(`${name}不建立 session，也不交換 token`, async ({ page, api }) => {
+    if (name === '網址查詢 code') {
+      await page.evaluate(() => localStorage.setItem('sb-llqwzrgzekalwdnetvyb-auth-token-code-verifier', 'test-verifier'));
+    }
+    await page.goto(url);
+    await openLeads(page);
+    await expect(page.locator('#leads-login')).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('sb-llqwzrgzekalwdnetvyb-auth-token'))).toBeNull();
+    expect(api.requests.filter(r => r.path === '/auth/v1/token')).toEqual([]);
+    expect(api.requests.some(r => r.path === '/rest/v1/app_admins')).toBe(false);
+  });
+}
+
+test('使用說明區分本機專案與雲端客戶名單', async ({ page }) => {
+  await page.getByRole('button', { name: '使用說明' }).click();
+  await expect(page.locator('#info-dialog')).toContainText('本機專案存在這台瀏覽器；「客戶名單」需要登入，資料來自雲端資料庫（Messenger 表單）。共用或借用裝置時，用完請按登出。');
+  await expect(page.locator('#info-dialog')).not.toContainText('未連接 AI、Messenger 或雲端');
 });
 
 test('密碼錯誤只顯示固定錯誤', async ({ page, api }) => {

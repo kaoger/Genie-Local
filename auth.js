@@ -9,6 +9,7 @@ const safeFetch = (input, init = {}) => {
   return fetch(input, { ...init, headers });
 };
 const client = window.supabase.createClient(supabaseUrl, supabasePublishableKey, {
+  auth: { detectSessionInUrl: false },
   global: { fetch: safeFetch },
 });
 let state = { status: 'checking', displayName: '', email: '' };
