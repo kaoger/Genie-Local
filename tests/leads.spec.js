@@ -1,7 +1,7 @@
 'use strict';
 const { test: base, expect } = require('@playwright/test');
 
-const SELECT = 'id,status,answers,customer_name,phone,project_type,location,interior_area,budget_range,start_time,completed_at,contact_result,contact_result_at,contact_first_at,lead_grade,notification_status';
+const SELECT = 'id,status,answers,customer_name,phone,project_type,location,interior_area,budget_range,start_time,completed_at,contact_result,contact_result_at,contact_first_at,lead_grade,notification_status,messenger_user_id';
 const email = 'member@example.test';
 const user = { id: '00000000-0000-4000-8000-000000000001', email, app_metadata: { provider: 'email', providers: ['email'] }, user_metadata: {}, aud: 'authenticated', role: 'authenticated' };
 const session = () => ({ access_token: 'member-access-token', refresh_token: 'member-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, user });
@@ -9,7 +9,7 @@ const lead = (id, extra = {}) => ({ id, status: 'complete', answers: { contact_t
 
 const test = base.extend({
   api: [async ({ page }, use) => {
-    const api = { rows: [], requests: [], fail: false, unauthorized: false, refreshes: 0 };
+    const api = { rows: [], requests: [], patches: [], fail: false, patchStatus: 200, unauthorized: false, refreshes: 0 };
     await page.route('https://llqwzrgzekalwdnetvyb.supabase.co/**', async route => {
       const request = route.request(), url = new URL(request.url());
       const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'content-type': 'application/json' };
@@ -19,10 +19,20 @@ const test = base.extend({
       if (url.pathname === '/auth/v1/logout') return route.fulfill({ status: 204, headers });
       if (url.pathname === '/rest/v1/app_admins') return route.fulfill({ status: 200, headers, body: '[{"display_name":"測試成員","active":true}]' });
       if (url.pathname === '/rest/v1/customer_leads') {
-        api.requests.push({ url, headers: request.headers() });
+        if (request.method() === 'PATCH') api.patches.push({ url, body: request.postData(), headers: request.headers() });
+        else api.requests.push({ url, headers: request.headers() });
         if (api.unauthorized === true || api.unauthorized > 0) {
           if (typeof api.unauthorized === 'number') api.unauthorized--;
           return route.fulfill({ status: 401, headers, body: '{"code":"PGRST301","message":"JWT expired"}' });
+        }
+        if (request.method() === 'PATCH') {
+          if (api.patchStatus === 500) return route.fulfill({ status: 500, headers, body: '{"message":"write failed"}' });
+          if (api.patchStatus === 0) return route.fulfill({ status: 200, headers, body: '[]' });
+          const row = api.rows.find(item => item.id === url.searchParams.get('id')?.replace(/^eq\./, ''));
+          if (!row) return route.fulfill({ status: 200, headers, body: '[]' });
+          row.contact_result = JSON.parse(request.postData()).contact_result;
+          row.contact_result_at = new Date().toISOString();
+          return route.fulfill({ status: 200, headers, body: JSON.stringify([row]) });
         }
         if (api.fail) return route.fulfill({ status: 500, headers, body: '{"message":"read failed"}' });
         const pending = url.searchParams.get('contact_result') === 'is.null';
@@ -131,4 +141,69 @@ test('JWT 失效後續期成功會重試查詢', async ({ page, api }) => {
   await login(page);
   await expect(page.locator('[data-lead-section="pending"] .lead-card')).toHaveCount(1);
   expect(api.refreshes).toBeGreaterThan(0);
+});
+
+test('回報結果只更新 contact_result，重新讀取後移到已聯絡', async ({ page, api }) => {
+  api.rows = [lead('write-one')];
+  await login(page);
+  const pending = page.locator('[data-lead-section="pending"] .lead-card');
+  await expect(pending.locator('[data-lead-result]')).toHaveCount(4);
+  const before = api.requests.length;
+  await pending.getByRole('button', { name: '約丈量' }).click();
+  await expect(page.locator('[data-lead-section="pending"] .lead-card')).toHaveCount(0);
+  const contacted = page.locator('[data-lead-section="contacted"] .lead-card');
+  await expect(contacted).toHaveCount(1);
+  await expect(contacted).toContainText('約丈量');
+  await expect(contacted).toContainText('剛剛');
+  await expect(contacted.getByRole('button', { name: '約丈量' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(contacted.getByRole('button', { name: '已聯絡' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#toast-text')).toHaveText('已記錄：約丈量');
+  expect(api.patches).toHaveLength(1);
+  expect(api.patches[0].body).toBe('{"contact_result":"site_visit"}');
+  expect(api.patches[0].url.searchParams.get('id')).toBe('eq.write-one');
+  expect(api.patches[0].url.searchParams.get('select')).toBe(SELECT);
+  expect(api.requests.length).toBeGreaterThanOrEqual(before + 2);
+});
+
+test('空回傳與 500 均保留卡片和原結果', async ({ page, api }) => {
+  api.rows = [lead('write-fail')];
+  await login(page);
+  const card = page.locator('[data-lead-section="pending"] .lead-card');
+  api.patchStatus = 0;
+  await card.getByRole('button', { name: '已聯絡' }).click();
+  await expect(page.locator('#toast-text')).toHaveText('沒有權限或資料已變更，請重新整理');
+  await expect(card).toHaveCount(1);
+  await expect(card.getByRole('button', { name: '已聯絡' })).toHaveAttribute('aria-pressed', 'false');
+  api.patchStatus = 500;
+  await card.getByRole('button', { name: '約丈量' }).click();
+  await expect(page.locator('#toast-text')).toHaveText('儲存失敗，請稍後再試');
+  await expect(card).toHaveCount(1);
+  expect(api.rows[0].contact_result).toBeNull();
+});
+
+test('Messenger 只對有效數字 ID 顯示正確連結', async ({ page, api }) => {
+  api.rows = [lead('valid', { messenger_user_id: '123456789012345' }), lead('letters', { messenger_user_id: 'abc' }), lead('empty', { messenger_user_id: null })];
+  await login(page);
+  const link = page.locator('[data-lead-id="valid"] .lead-messenger');
+  await expect(link).toHaveText('💬 Messenger');
+  await expect(link).toHaveAttribute('href', 'https://business.facebook.com/latest/inbox/all/?asset_id=157645098246646&business_id=404673281059049&mailbox_id=157645098246646&selected_item_id=123456789012345&thread_type=FB_MESSAGE');
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(page.locator('[data-lead-id="letters"] .lead-messenger')).toHaveCount(0);
+  await expect(page.locator('[data-lead-id="empty"] .lead-messenger')).toHaveCount(0);
+  await expect(page.locator('.lead-messenger-hint')).toContainText('超過請改打電話');
+  expect(api.requests.every(request => request.url.searchParams.get('select')?.includes('messenger_user_id'))).toBe(true);
+});
+
+test('寫入時 401 續期後重試，仍失敗則返回登入', async ({ page, api }) => {
+  api.rows = [lead('retry')];
+  await login(page);
+  api.unauthorized = 1;
+  await page.locator('[data-lead-id="retry"]').getByRole('button', { name: '聯絡不上' }).click();
+  await expect(page.locator('[data-lead-section="contacted"] .lead-card')).toHaveCount(1);
+  expect(api.patches).toHaveLength(2);
+  expect(api.refreshes).toBeGreaterThan(0);
+  api.unauthorized = true;
+  await page.locator('[data-lead-id="retry"]').getByRole('button', { name: '約丈量' }).click();
+  await expect(page.locator('#leads-login')).toBeVisible();
 });

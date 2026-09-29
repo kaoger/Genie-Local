@@ -1,9 +1,9 @@
 'use strict';
 (() => {
-/* ================= 客戶名單（唯讀） ================= */
+/* ================= 客戶名單與聯絡結果 ================= */
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-const columns = 'id,status,answers,customer_name,phone,project_type,location,interior_area,budget_range,start_time,completed_at,contact_result,contact_result_at,contact_first_at,lead_grade,notification_status';
+const columns = 'id,status,answers,customer_name,phone,project_type,location,interior_area,budget_range,start_time,completed_at,contact_result,contact_result_at,contact_first_at,lead_grade,notification_status,messenger_user_id';
 const sections = {
   pending: { size: 50, order: 'completed_at', ascending: true, empty: '目前沒有待聯絡的客戶' },
   contacted: { size: 20, order: 'contact_result_at', ascending: false, empty: '還沒有已聯絡的客戶' },
@@ -13,6 +13,8 @@ const grades = { hot: '🔥 高分', normal: '一般', low: '低' };
 let epoch = 0;
 let lists = {};
 let root = null;
+const saving = new Set();
+let toastTimer;
 
 function active() { return location.hash === '#/leads' && window.GenieAuth.getState().status === 'member' && root?.isConnected; }
 function relative(value) {
@@ -35,6 +37,14 @@ function valueText(value) {
   return value === null || value === undefined || value === '' ? '—' : String(value);
 }
 function field(label, value) { return `<div><dt>${label}</dt><dd>${esc(valueText(value))}</dd></div>`; }
+function notice(message) {
+  const toast = $('#toast');
+  $('#toast-text').textContent = message;
+  $('#toast-action').hidden = true;
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.hidden = true; }, 5000);
+}
 function card(lead, kind) {
   const phone = valueText(lead.phone);
   const tel = String(lead.phone ?? '').replace(/[^0-9+\-]/g, '');
@@ -42,9 +52,13 @@ function card(lead, kind) {
   const overdue = kind === 'pending' && Number.isFinite(Date.parse(lead.completed_at)) && Date.now() - Date.parse(lead.completed_at) > 3 * 86400000;
   const grade = lead.lead_grade ? `<span class="lead-tag grade-${esc(lead.lead_grade)}">${esc(grades[lead.lead_grade] || lead.lead_grade)}</span>` : '';
   const phoneHtml = tel ? `<a href="tel:${esc(tel)}">${esc(phone)}</a>` : esc(phone);
+  const messengerId = String(lead.messenger_user_id ?? '');
+  const messengerUrl = /^\d{5,25}$/.test(messengerId) ? `https://business.facebook.com/latest/inbox/all/?asset_id=${encodeURIComponent(window.GENIE_CONFIG.metaPageId)}&business_id=${encodeURIComponent(window.GENIE_CONFIG.metaBusinessId)}&mailbox_id=${encodeURIComponent(window.GENIE_CONFIG.metaPageId)}&selected_item_id=${encodeURIComponent(messengerId)}&thread_type=FB_MESSAGE` : '';
+  const resultButtons = Object.entries(results).map(([value, label]) => `<button type="button" class="lead-result" data-lead-result="${esc(value)}" aria-pressed="${lead.contact_result === value}" ${saving.has(String(lead.id)) ? 'disabled' : ''}>${esc(label)}</button>`).join('');
   return `<article class="lead-card" data-lead-id="${esc(lead.id)}">
     <div class="lead-card-top"><h3>${esc(valueText(lead.customer_name))}</h3><div class="lead-tags">${grade}${overdue ? '<span class="lead-tag lead-alert">超過 3 天未聯絡</span>' : ''}${lead.notification_status === 'failed' ? '<span class="lead-tag lead-alert">通知信寄送失敗</span>' : ''}</div></div>
     <dl class="lead-fields">${field('服務', lead.project_type)}${field('地區', lead.location)}${field('坪數', lead.interior_area)}${field('預算', lead.budget_range)}${field('開始時間', lead.start_time)}${field('方便聯絡時段', contactTime)}<div><dt>姓名</dt><dd>${esc(valueText(lead.customer_name))}</dd></div><div><dt>電話</dt><dd>${phoneHtml}</dd></div><div><dt>送出時間</dt><dd>${timeHtml(lead.completed_at)}</dd></div>${kind === 'contacted' ? `<div><dt>聯絡結果</dt><dd>${esc(results[lead.contact_result] || valueText(lead.contact_result))}</dd></div><div><dt>結果時間</dt><dd>${timeHtml(lead.contact_result_at)}</dd></div>` : ''}</dl>
+    <div class="lead-actions"><div class="lead-results" role="group" aria-label="聯絡結果">${resultButtons}</div>${messengerUrl ? `<a class="lead-messenger" href="${esc(messengerUrl)}" target="_blank" rel="noopener noreferrer">💬 Messenger</a>` : ''}</div>
   </article>`;
 }
 function render(kind) {
@@ -106,10 +120,43 @@ function refresh() {
 }
 function activate() {
   root = $('#leads-list');
-  if (root) refresh();
+  if (root) {
+    root.insertAdjacentHTML('afterbegin', '<p class="lead-messenger-hint">Messenger 只能在客人最後傳訊後一段時間內回覆；超過請改打電話。</p>');
+    refresh();
+  }
 }
 function deactivate() { ++epoch; root = null; }
+async function saveResult(cardElement, value) {
+  const id = cardElement.dataset.leadId;
+  if (!id || !Object.hasOwn(results, value) || saving.has(id)) return;
+  saving.add(id);
+  cardElement.querySelectorAll('[data-lead-result]').forEach(button => { button.disabled = true; });
+  const current = epoch;
+  const client = window.GenieAuth.getClient();
+  const run = () => client.from('customer_leads').update({ contact_result: value }).eq('id', id).select(columns);
+  try {
+    let response = await run();
+    if (response.status === 401) {
+      const refreshed = await client.auth.refreshSession();
+      if (refreshed.error || !refreshed.data?.session) { await window.GenieAuth.signOut(); return; }
+      response = await run();
+      if (response.status === 401) { await window.GenieAuth.signOut(); return; }
+    }
+    if (current !== epoch || !active()) return;
+    if (response.error) { notice('儲存失敗，請稍後再試'); return; }
+    if (!Array.isArray(response.data) || response.data.length === 0) { notice('沒有權限或資料已變更，請重新整理'); return; }
+    refresh();
+    notice(`已記錄：${results[value]}`);
+  } catch {
+    if (current === epoch && active()) notice('儲存失敗，請稍後再試');
+  } finally {
+    saving.delete(id);
+    cardElement.querySelectorAll('[data-lead-result]').forEach(button => { button.disabled = false; });
+  }
+}
 $('#leads-view').addEventListener('click', event => {
+  const result = event.target.closest('[data-lead-result]');
+  if (result) { saveResult(result.closest('.lead-card'), result.dataset.leadResult); return; }
   const kind = event.target.closest('[data-lead-more]')?.dataset.leadMore;
   if (kind && sections[kind]) load(kind);
 });

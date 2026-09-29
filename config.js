@@ -3,4 +3,6 @@
 window.GENIE_CONFIG = {
   supabaseUrl: 'https://llqwzrgzekalwdnetvyb.supabase.co',
   supabasePublishableKey: 'sb_publishable_8qqY0NqIsbsjniO-QeJAqQ_eTWeDanS',
+  metaPageId: '157645098246646',
+  metaBusinessId: '404673281059049',
 };
