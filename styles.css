@@ -186,7 +186,7 @@ main,#list-view,#detail-view,.detail-body,.card{min-width:0}
 .auth-shell .auth-card{width:min(100%,420px)}
 .offline-banner{position:fixed;z-index:20;top:0;left:73px;right:0;display:flex;align-items:center;justify-content:center;gap:12px;min-height:40px;padding:6px 12px;background:#fff3cd;color:#604500;border-bottom:1px solid #e9cf83}
 .offline-banner button{border:1px solid #bd9b48;padding:4px 10px}
-body:has(.offline-banner:not([hidden])) main{padding-top:40px}
+body:has(.offline-banner:not([hidden])) main{padding-top:var(--offline-height,40px)}
 .sidebar-bottom{margin-top:auto;margin-bottom:18px;display:grid;justify-items:center;gap:8px}
 .sidebar-bottom .help-button{position:static}
 .sidebar-bottom [data-action="signout"]{font-size:12px;padding:6px 4px}
@@ -212,7 +212,6 @@ summary{cursor:pointer;font-weight:600;color:#343b43;overflow-wrap:anywhere}.car
 .totals{max-width:440px;margin:24px 0 0 auto}.totals>div{display:flex;justify-content:space-between;gap:20px;padding:10px 0}.totals dd{margin:0;text-align:right;overflow-wrap:anywhere}.totals dt{flex-shrink:0}.grand-total{border-top:1px solid #b8bfc7;font-weight:600;font-size:17px;color:#111}
 .card-head{flex-wrap:wrap}.card-head h2{overflow-wrap:anywhere}.doc-table td,.doc-table th{overflow-wrap:anywhere}
 #toast-text{min-width:0;overflow-wrap:anywhere}
-+
 /* ================= 策略 AI 草稿 ================= */
 .strategy-workflow,.strategy-document,.strategy-edit,.strategy-preview{min-width:0;overflow-wrap:anywhere}
 .strategy-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
@@ -246,3 +245,61 @@ summary{cursor:pointer;font-weight:600;color:#343b43;overflow-wrap:anywhere}.car
 }
 @media(max-width:900px){.status-actions{max-width:260px}}
 @media(max-width:600px){.status-bar{flex-direction:column;align-items:stretch;padding:16px}.status-actions{max-width:none;justify-content:flex-start}.status-actions button{flex:1}.card{padding:16px}.reference-values{grid-template-columns:1fr}.segmented{width:100%}.segmented button{flex:1;padding:8px;font-size:12px}.totals{width:100%}.totals>div{gap:12px}.detail-top{gap:8px}.crumbs{flex:1}.detail-actions{max-width:60%}.detail-actions .primary{white-space:normal}.doc-table th{width:34%}.status-main .chip-row{margin-bottom:6px}.stepper li{flex-shrink:0}#toast{flex-wrap:wrap;gap:8px}#toast-text{flex:1 1 100%}}
+
+/* ================= v6.1：名單切換與手機卡片 ================= */
+.lead-tabs{display:flex;gap:8px;border-bottom:1px solid #cbd0d6}
+.lead-tabs button{min-height:44px;padding:10px 16px;border-radius:6px 6px 0 0;color:#343b43}
+.lead-tabs button[aria-selected="true"]{background:#111;color:#fff}
+.lead-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.lead-filters button{min-height:44px;padding:8px 12px;border:1px solid #cbd0d6;border-radius:999px;background:#fff;color:#343b43}
+.lead-filters button[aria-pressed="true"]{background:#111;color:#fff;border-color:#111}
+.lead-filters [data-filter-count]:empty{display:none}
+.lead-filters [data-filter-count]:not(:empty)::before{content:'·';margin:0 4px}
+.leads-list{gap:18px}
+.lead-more{min-height:44px}
+.project-cards,.card-select-all,.card-example{display:none}
+.project-cards{gap:12px}
+.project-card{min-width:0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;color:#343b43;cursor:pointer;overflow-wrap:anywhere}
+.project-card.selected{background:#e6edf2}
+.project-card-head{display:flex;align-items:start;justify-content:space-between;gap:10px}
+.project-card h2{font-size:17px;color:#111;margin:0 0 12px;min-width:0;overflow-wrap:anywhere}
+.project-card-select{min-width:44px;min-height:44px;display:grid;place-items:center;cursor:pointer}
+.project-card-select input{width:22px;height:22px}
+.project-card dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0}
+.project-card dt{font-size:12px;color:#6b7280}
+.project-card dd{margin:3px 0 0;min-width:0;overflow-wrap:anywhere}
+.project-card-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:16px}
+.project-card-actions a,.project-card-actions button{min-width:44px;min-height:44px;display:inline-grid;place-items:center;border:1px solid #cbd0d6;border-radius:5px}
+.project-card-actions svg{width:18px;height:18px}
+.card-select-all{align-items:center;gap:8px;min-height:44px;cursor:pointer;color:#343b43}
+.card-select-all input{width:22px;height:22px}
+.card-example{margin:16px 0;color:#68717b;line-height:1.5}
+.sidebar{overflow-y:auto;overflow-x:hidden}
+.sidebar .avatar{min-width:44px;min-height:44px;flex-shrink:0}
+.nav-actions{position:static;margin-top:auto;flex-shrink:0;padding-top:16px}
+.nav-actions>button,.sidebar-bottom>button{min-width:44px;min-height:44px}
+.sidebar-bottom{flex-shrink:0;margin-top:auto;margin-bottom:8px}
+.sidebar-bottom .help-button{display:grid;place-items:center}
+.sidebar-bottom [data-action="signout"]{padding:10px 4px}
+@media(max-width:900px){
+  .table-scroll{display:none}
+  .project-cards{display:grid}
+  .card-select-all{display:flex}
+  .card-example{display:block}
+  .pagination button,.selection-bar button{min-width:44px;min-height:44px}
+  #pages button:not(.current){display:none}
+  #pages::after{content:' / ' attr(data-total);white-space:pre}
+  input:not([type=checkbox]),select,textarea{font-size:16px}
+  .leads-content{padding-bottom:150px}
+}
+@media(max-width:600px){
+  .lead-refresh,.leads-account button,.auth-switch,.dialog-footer button,.drawer-tabs button,.drawer-head button,.status-actions button,.detail-actions button,.detail-actions a,.stepper a,.source-actions button,.segmented button,.card-foot button{min-height:44px;min-width:44px}
+  .offline-banner{left:57px;flex-wrap:wrap;min-height:44px}
+  .offline-banner button{min-height:44px}
+  .content{padding-bottom:110px}
+  .detail-body{padding-bottom:120px}
+  .project-card dl{grid-template-columns:1fr}
+  #toast button{min-height:44px;min-width:44px}
+  footer{flex-wrap:wrap;gap:8px}
+  #count{position:static}
+}

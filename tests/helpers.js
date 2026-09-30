@@ -4,6 +4,7 @@ const { installMember } = require('./mock-auth');
 
 const STORAGE_KEY = 'genie-local-projects-v1';
 const STEPS = ['brief', 'strategy', 'visual', 'model3d', 'estimate', 'proposal'];
+const projectItems = page => page.locator(page.viewportSize().width <= 900 ? '#project-cards article[data-id]:visible' : '#rows tr[data-id]:visible');
 
 // 每個案例有獨立的 browser context，localStorage 與 sessionStorage 一開始均為空。
 // 自動 fixture 確保每個 spec 都初始化，錯誤監聽涵蓋首次載入與整段操作。
@@ -19,7 +20,7 @@ const test = base.extend({
   cleanStorage: [async ({ page, browserErrors }, use) => {
     await installMember(page);
     await page.goto('/');
-    await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
+    await expect(projectItems(page)).toHaveCount(8);
     await use();
   }, { auto: true }],
 });
@@ -134,5 +135,5 @@ async function storedProjects(page) {
 module.exports = {
   test, expect, STORAGE_KEY, STEPS, createProject, goStep, stepMeta, expectSteps,
   openEditor, saveEditor, fillRequired, editFields, markComplete, generateStrategy,
-  fillEstimate, completeAllSteps, storedProjects,
+  fillEstimate, completeAllSteps, storedProjects, projectItems,
 };

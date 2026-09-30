@@ -1,6 +1,7 @@
 'use strict';
 const { test: base, expect } = require('@playwright/test');
 const { USER, session } = require('./mock-auth');
+const { projectItems } = require('./helpers');
 
 const KEY = 'sb_publishable_8qqY0NqIsbsjniO-QeJAqQ_eTWeDanS';
 const TOKEN_KEY = 'sb-llqwzrgzekalwdnetvyb-auth-token';
@@ -61,7 +62,7 @@ for (const hash of ['#/', '#/p/sample-0/brief', '#/leads']) {
   test(`未登入深連結 ${hash} 只見登入殼層；登入後保留網址`, async ({ page }) => {
     await page.goto('/' + hash);
     await expect(page.locator('#leads-login')).toBeVisible();
-    await expect(page.locator('#rows tr[data-id]')).toHaveCount(0);
+    await expect(projectItems(page)).toHaveCount(0);
     await expect(page.locator('.sidebar')).toBeHidden();
     await expect(page.locator('#list-view')).toBeHidden();
     await expect(page.locator('#detail-view')).toBeHidden();
@@ -69,7 +70,7 @@ for (const hash of ['#/', '#/p/sample-0/brief', '#/leads']) {
     await expect(page).toHaveTitle('登入 Genie-Local');
     await login(page);
     await expect(page).toHaveURL(new RegExp(hash.replace(/[.*+?^$()|[\]{}]/g, '\\$&') + '$'));
-    if (hash === '#/') await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
+    if (hash === '#/') await expect(projectItems(page)).toHaveCount(8);
     if (hash.includes('/p/')) await expect(page.locator('.crumbs h1')).toContainText('居家設計');
     if (hash === '#/leads') await expect(page.locator('#leads-list')).toBeVisible();
   });
@@ -90,7 +91,7 @@ for (const [name, url] of [
     await expect(page.locator('#list-view')).toBeHidden();
     await expect(page.locator('#detail-view')).toBeHidden();
     await expect(page.locator('#leads-view')).toBeHidden();
-    await expect(page.locator('#rows tr[data-id]')).toHaveCount(0);
+    await expect(projectItems(page)).toHaveCount(0);
     expect(await storedSession(page)).toBeNull();
     expect(api.requests.filter(request => request.path === '/auth/v1/token')).toEqual([]);
     expect(api.memberRequests).toBe(0);
@@ -103,7 +104,7 @@ test('成員查詢載入中不顯示內容或執行匯出', async ({ page, api }
   await page.goto('/#/p/sample-0/brief');
   await expect.poll(() => api.memberRequests).toBe(1);
   await expect(page.locator('#auth-shell')).toContainText('正在檢查登入狀態…');
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(0);
+  await expect(projectItems(page)).toHaveCount(0);
   await expect(page.locator('.sidebar')).toBeHidden();
   await expect(page).toHaveURL(/#\/p\/sample-0\/brief$/);
   api.release();
@@ -116,7 +117,7 @@ test('密碼錯誤固定文案，登入後續期複查不拆表單或閃白', as
   await expect(page.locator('#leads-error')).toHaveText('帳號或密碼錯誤');
   expect(await storedSession(page)).toBeNull();
   await login(page);
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
+  await expect(projectItems(page)).toHaveCount(8);
   await page.getByRole('button', { name: '新增專案', exact: true }).click();
   await page.locator('#project-form [name="name"]').fill('未送出的表單');
   api.memberMode = 'hold';
@@ -134,7 +135,7 @@ test('非成員與停用成員登出並顯示拒絕畫面', async ({ page, api }
   await page.goto('/');
   await login(page);
   await expect(page.locator('#auth-shell')).toContainText('此帳號沒有權限，請聯絡管理者');
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(0);
+  await expect(projectItems(page)).toHaveCount(0);
   await expect(page.locator('.sidebar')).toBeHidden();
   await expect.poll(() => storedSession(page)).toBeNull();
   await page.getByRole('button', { name: '換個帳號登入' }).click();
@@ -147,7 +148,7 @@ test('非成員與停用成員登出並顯示拒絕畫面', async ({ page, api }
 test('登出關閉對話框、清 toast 與畫面，本機資料和記住信箱保留', async ({ page }) => {
   await page.goto('/');
   await login(page);
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
+  await expect(projectItems(page)).toHaveCount(8);
   await page.getByRole('button', { name: '新增專案', exact: true }).click();
   await page.locator('#project-form [name="name"]').fill('本機測試');
   await page.locator('#project-form button[type="submit"]').click();
@@ -159,7 +160,8 @@ test('登出關閉對話框、清 toast 與畫面，本機資料和記住信箱�
   await expect(page.locator('#leads-login')).toBeVisible();
   await expect(page.locator('#drawer')).toBeHidden();
   await expect(page.locator('#toast')).toBeHidden();
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(0);
+  await expect(projectItems(page)).toHaveCount(0);
+  await expect(page.locator('#project-cards')).toBeEmpty();
   await expect(page).toHaveTitle('登入 Genie-Local');
   expect(await page.evaluate(key => localStorage.getItem(key), PROJECT_KEY)).toBe(keyBefore);
   expect(await page.evaluate(() => localStorage.getItem('genie-last-email'))).toBe(USER.email);
@@ -176,7 +178,7 @@ for (const mode of ['server', 'abort']) {
     expect(await storedSession(page)).not.toBeNull();
     api.memberMode = 'ok';
     await page.getByRole('button', { name: '重試' }).click();
-    await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
+    await expect(projectItems(page)).toHaveCount(8);
   });
 }
 
@@ -198,17 +200,17 @@ test('成員查詢逾時約 8 秒後保留 session 並顯示重試', async ({ pa
 test('已確認成員離線可用本機，恢復後查到停用即收畫面', async ({ page, api }) => {
   await page.goto('/');
   await login(page);
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
+  await expect(projectItems(page)).toHaveCount(8);
   api.memberMode = 'server';
   await page.evaluate(() => window.GenieAuth.getClient().auth.refreshSession());
   await expect(page.locator('#offline-banner')).toBeVisible();
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
+  await expect(projectItems(page)).toHaveCount(8);
   expect(await storedSession(page)).not.toBeNull();
   api.memberMode = 'ok';
   api.member = { display_name: '停用', active: false };
   await page.getByRole('button', { name: '重試' }).click();
   await expect(page.locator('#auth-shell')).toContainText('此帳號沒有權限，請聯絡管理者');
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(0);
+  await expect(projectItems(page)).toHaveCount(0);
   await expect(page.locator('#offline-banner')).toBeHidden();
   await expect.poll(() => storedSession(page)).toBeNull();
 });
@@ -216,7 +218,7 @@ test('已確認成員離線可用本機，恢復後查到停用即收畫面', as
 test('停用 A 只移除 A 的曾確認紀錄，再登入遇 5xx 不放行', async ({ page, api }) => {
   await page.goto('/');
   await login(page);
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
+  await expect(projectItems(page)).toHaveCount(8);
   await page.evaluate(({ key, ids }) => localStorage.setItem(key, JSON.stringify(ids)),
     { key: VERIFIED_KEY, ids: [USER.id, OTHER_UID] });
   api.member = { display_name: '停用', active: false };
@@ -230,7 +232,7 @@ test('停用 A 只移除 A 的曾確認紀錄，再登入遇 5xx 不放行', asy
   await expect(page.locator('#auth-shell')).toContainText('無法連線，請稍後再試');
   await expect(page.getByRole('button', { name: '重試' })).toBeVisible();
   await expect(page.locator('.sidebar')).toBeHidden();
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(0);
+  await expect(projectItems(page)).toHaveCount(0);
   await expect(page.locator('#offline-banner')).toBeHidden();
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)), VERIFIED_KEY)).toEqual([OTHER_UID]);
 });
@@ -246,7 +248,7 @@ for (const [mode, expected] of [['unauthorized', '登入 Genie-Local'], ['forbid
     await expect(page.locator('#auth-shell')).toContainText(expected);
     await expect.poll(() => storedSession(page)).toBeNull();
     await expect(page.locator('.sidebar')).toBeHidden();
-    await expect(page.locator('#rows tr[data-id]')).toHaveCount(0);
+    await expect(projectItems(page)).toHaveCount(0);
     await expect(page.locator('#offline-banner')).toBeHidden();
     expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)), VERIFIED_KEY))
       .toEqual(mode === 'forbidden' ? [OTHER_UID] : [USER.id, OTHER_UID]);
@@ -287,7 +289,7 @@ test('未登入時合成的匯出與說明動作不執行', async ({ page }) => 
   await expect(page.locator('#info-dialog')).toBeHidden();
   await expect(page.locator('#toast')).toBeHidden();
   expect(downloads).toHaveLength(0);
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(0);
+  await expect(projectItems(page)).toHaveCount(0);
   await expect(page).toHaveURL(/#\/$/);
 });
 

@@ -122,26 +122,42 @@ function strategyPrompt(p){
 }
 function parseStrategy(raw){
   const original=String(raw??''),warnings=[],sections=Object.fromEntries(STRATEGY_KEYS.map(([key])=>[key,'']));
-  let input=original.replace(/[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g,'').replace(/\r\n?/g,'\n').trim();
+  const cjk='\u3000-\u303F\u3400-\u9FFF\uF900-\uFAFF\u3040-\u30FF\uAC00-\uD7AF\uFF01-\uFF60\uFFE0-\uFFE6';
+  let input=original.replace(new RegExp(`(?<=[${cjk}])[\\u200C\\u200D](?=[${cjk}])`,'g'),'').replace(/[\u00AD\u180E\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g,'').replace(/\r\n?/g,'\n').trim();
   const title='提案概述|設計方向|預算與時程提醒|需要向客戶確認的問題|下一步';
-  const fence=/^[ \t]*```[^\n]*\n([\s\S]*?)\n[ \t]*```[ \t]*(?=\n|$)/gm;
-  let outside='';
-  for(const match of input.matchAll(fence)){
-    if(!new RegExp(`GENIE-STRATEGY-v1|【\\s*(?:${title})\\s*】`,'i').test(match[1]))continue;
-    outside=(input.slice(0,match.index)+'\n'+input.slice(match.index+match[0].length)).trim();
-    input=match[1].trim();
-    break;
-  }
+  const label=new RegExp(`【\\s*(${title})\\s*】|(^|\\n)[ \\t]*(?:#{1,6}[ \\t]*)?(?:\\*\\*)?(${title})(?:\\*\\*)?[ \\t]*(?=\\n|$)`,'g');
   const marker=/^[^\S\n]*(?:[【［\[][^\S\n]*GENIE-STRATEGY-v1[^\S\n]*(開始|結束)[^\S\n]*[】］\]]|[<＜]{1,3}[^\S\n]*GENIE-STRATEGY-v1[^\S\n]*(?::|[^\S\n]+)[^\S\n]*(START|END)[^\S\n]*[>＞]{1,3})[^\S\n]*$/gim;
+  const hasTitle=text=>{label.lastIndex=0;return label.test(text);};
+  const fence=/^[ \t]*```[^\n]*\n([\s\S]*?)\n[ \t]*```[ \t]*(?=\n|$)/gm;
+  const candidates=[...input.matchAll(fence)].filter(m=>/GENIE-STRATEGY-v1/i.test(m[1])||hasTitle(m[1]));
+  let outside='';
+  if(candidates.length){
+    if(candidates.length>1)warnings.push('有多個程式碼框，請核對');
+    const scored=candidates.map(m=>{
+      label.lastIndex=0;
+      const body=m[1].replace(marker,''),hits=[...body.matchAll(label)],nonempty=new Set();
+      hits.forEach((hit,i)=>{if(body.slice(hit.index+hit[0].length,hits[i+1]?.index??body.length).trim())nonempty.add(hit[1]||hit[3]);});
+      return {match:m,score:nonempty.size};
+    });
+    const chosen=scored.reduce((best,item)=>item.score>=best.score?item:best).match;
+    const after=input.slice(chosen.index+chosen[0].length);
+    if(hasTitle(after)){
+      warnings.push('程式碼框可能被提前結束');
+      input=input.replace(/^[ \t]*```[^\n]*$/gm,'').trim();
+    }else{
+      outside=(input.slice(0,chosen.index)+'\n'+after).trim();
+      input=chosen[1].trim();
+    }
+  }
   const matches=[...input.matchAll(marker)],kind=m=>m[1]||m[2].toUpperCase(),start=matches.find(m=>['開始','START'].includes(kind(m))),end=matches.find(m=>['結束','END'].includes(kind(m))&&(!start||m.index>start.index));
   const withoutMarkers=text=>text.replace(marker,'').trim();
   if(start&&end){const around=withoutMarkers(input.slice(0,start.index)+'\n'+input.slice(end.index+end[0].length));outside=[outside,around].filter(Boolean).join('\n');input=withoutMarkers(input.slice(start.index+start[0].length,end.index));}
   else warnings.push('找不到完整的 START／END 標記，已用全文解析。');
   if(!start||!end)input=withoutMarkers(input);
-  const label=new RegExp(`【\\s*(${title})\\s*】|(^|\\n)[ \\t]*(?:#{1,6}[ \\t]*)?(?:\\*\\*)?(${title})(?:\\*\\*)?[ \\t]*(?=\\n|$)`,'g');
+  label.lastIndex=0;
   const hits=[...input.matchAll(label)].map(m=>({index:m.index,end:m.index+m[0].length,title:m[1]||m[3]}));
   let unclassified=outside;
-  if(hits.length){const before=input.slice(0,hits[0].index).trim();if(before){if(!hits.some(h=>h.title==='提案概述')){sections.overview=before;warnings.push('提案概述未找到標題，已用第一段文字代替，請核對');}else unclassified+=(unclassified?'\n':'')+before;}
+  if(hits.length){const before=input.slice(0,hits[0].index).trim();if(before){if(!hits.some(h=>h.title==='提案概述')){sections.overview=before;warnings.push('提案概述沒有標題，已把第一個標題前的文字全部放入，請刪除不屬於概述的句子');}else unclassified+=(unclassified?'\n':'')+before;}
     hits.forEach((h,i)=>{const key=STRATEGY_KEYS.find(([,name])=>name===h.title)[0],body=input.slice(h.end,hits[i+1]?.index??input.length).trim();if(sections[key])warnings.push(`重複欄位：${h.title}`);sections[key]+=(sections[key]&&body?'\n':'')+body;});
   }else if(input)unclassified+=(unclassified?'\n':'')+input;
   if(!hits.length)warnings.push('請確認有複製到整段回答');
@@ -300,10 +316,12 @@ function render(){
 page=Math.max(0,Math.min(page,Math.ceil(projects.length/pageSize)-1));
 const rows=current();
 $('#rows').innerHTML=rows.map(p=>`<tr data-id="${esc(p.id)}" class="${selected.has(p.id)?'selected':''}"><td><input type="checkbox" data-select="${esc(p.id)}" aria-label="選取專案 ${esc(p.name)}" ${selected.has(p.id)?'checked':''}></td><td><a class="project-name" href="${projectHref(p,'brief')}" title="開啟專案">${esc(p.name)}</a>${p.id.startsWith('sample-')?'<span class="example-badge seed-badge">示範</span>':''}</td><td>${esc(p.contact)}</td><td>${esc(dateText(p.date))}</td><td><span class="type-tag">${esc(p.type)}</span></td><td>${esc(p.email)}</td><td>${esc(p.phone)}</td><td>${esc(dateText(p.due))}</td><td>${esc(sourceLabel(p))}</td><td>${currentStep(p)}</td><td><div class="row-actions"><button data-copy="${esc(p.id)}" aria-label="複製 ${esc(p.name)}" title="複製專案">${icon('copy')}</button><button data-delete="${esc(p.id)}" aria-label="刪除 ${esc(p.name)}" title="刪除專案">${icon('trash')}</button></div></td></tr>`).join('')+`<tr class="example-row"><td></td><td><span class="example-badge">範例</span><span class="example-name">示範品牌 / Demo Brand</span></td><td>示範聯絡人</td><td>2024/11/27</td><td><span class="type-tag">品牌設計</span></td><td>info@example.com</td><td></td><td>2025/01/31</td><td>—</td><td>—</td><td></td></tr>`;
+$('#project-cards').innerHTML=rows.map(p=>`<article class="project-card ${selected.has(p.id)?'selected':''}" data-id="${esc(p.id)}" data-open="${esc(p.id)}" tabindex="0" role="link" aria-label="開啟專案 ${esc(p.name)}"><div class="project-card-head"><h2>${esc(p.name)}${p.id.startsWith('sample-')?'<span class="example-badge seed-badge">示範</span>':''}</h2><label class="project-card-select" aria-label="選取專案 ${esc(p.name)}"><input type="checkbox" data-select="${esc(p.id)}" aria-label="選取專案 ${esc(p.name)}" ${selected.has(p.id)?'checked':''}></label></div><dl><div><dt>聯絡人</dt><dd>${esc(p.contact||'—')}</dd></div><div><dt>洽詢日期</dt><dd>${esc(dateText(p.date))}</dd></div><div><dt>需求來源</dt><dd>${esc(sourceLabel(p))}</dd></div><div><dt>目前步驟</dt><dd>${currentStep(p)}</dd></div></dl><div class="project-card-actions"><a class="btn" href="${projectHref(p,'brief')}">開啟</a><button data-copy="${esc(p.id)}" aria-label="複製 ${esc(p.name)}">${icon('copy')}</button><button data-delete="${esc(p.id)}" aria-label="刪除 ${esc(p.name)}">${icon('trash')}</button></div></article>`).join('');
 const all=$('#select-all');all.checked=rows.length>0&&rows.every(p=>selected.has(p.id));all.indeterminate=rows.some(p=>selected.has(p.id))&&!all.checked;all.disabled=!rows.length;
+const cardAll=$('#card-select-all');cardAll.checked=all.checked;cardAll.indeterminate=all.indeterminate;cardAll.disabled=all.disabled;
 $('.selection-bar').hidden=!selected.size;$('#selected-count').textContent=`已選取 ${selected.size} 個專案`;
 const total=Math.max(1,Math.ceil(projects.length/pageSize));$('#prev').disabled=page===0;$('#next').disabled=page>=total-1;
-$('#pages').innerHTML=Array.from({length:total},(_,i)=>`<button data-page="${i}" class="${i===page?'current':''}" aria-label="第 ${i+1} 頁" ${i===page?'aria-current="page"':''}>${i+1}</button>`).join('');$('#count').textContent=`${rows.length} / ${projects.length}`;
+$('#pages').dataset.total=total;$('#pages').innerHTML=Array.from({length:total},(_,i)=>`<button data-page="${i}" class="${i===page?'current':''}" aria-label="第 ${i+1} 頁" ${i===page?'aria-current="page"':''}>${i+1}</button>`).join('');$('#count').textContent=`${rows.length} / ${projects.length}`;
 }
 function today(){const t=new Date();return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;}
 function openCreate(){const form=$('#project-form');form.reset();form.elements.type.innerHTML=TYPES.map(t=>`<option>${esc(t)}</option>`).join('');form.elements.date.value=today();form.elements.type.value='居家裝潢設計';$('#editor').showModal();}
@@ -355,7 +373,7 @@ function strategyDocument(p,strategy){
 }
 function strategyBody(p){
   const ready=stepStatus(p,'brief').s==='done';
-  const controls=`<section class="card strategy-workflow"><div class="card-head"><h2>AI 草稿・複製貼上</h2></div><p class="muted">先預覽遮罩後的指令，再複製到自己的 AI App。按 AI 回答中程式碼框右上角的『複製』；沒有程式碼框時，長按回答 → 複製。回來貼入文字框。iOS 若詢問「允許貼上」，請按允許。資料會進你的 AI 帳號，本站無法控制該公司的訓練或記憶設定。</p><div class="strategy-actions"><button class="primary" data-action="strategy-prompt" ${ready?'':'disabled'}>複製 AI 指令</button><button data-action="strategy-paste" ${ready?'':'disabled'}>貼上 AI 回覆</button><button data-action="gen-strategy" ${ready?'':'disabled'}>略過 AI，產生示範草稿</button></div>${p.strategyPending?`<p class="muted">待回覆指令：${esc(timeText(p.strategyPending.at))}</p>`:''}</section>`;
+  const controls=`<section class="card strategy-workflow"><div class="card-head"><h2>AI 草稿・複製貼上</h2></div><p class="muted">先預覽遮罩後的指令，再複製到自己的 AI App。按 AI 回答中程式碼框右上角的『複製』；沒有程式碼框時，長按回答 → 複製。Claude 若把內容開在側邊文件，按文件上的 Copy。回來貼入文字框。iOS 若詢問「允許貼上」，請按允許。資料會進你的 AI 帳號，本站無法控制該公司的訓練或記憶設定。</p><div class="strategy-actions"><button class="primary" data-action="strategy-prompt" ${ready?'':'disabled'}>複製 AI 指令</button><button data-action="strategy-paste" ${ready?'':'disabled'}>貼上 AI 回覆</button><button data-action="gen-strategy" ${ready?'':'disabled'}>略過 AI，產生示範草稿</button></div>${p.strategyPending?`<p class="muted">待回覆指令：${esc(timeText(p.strategyPending.at))}</p>`:''}</section>`;
   const edit=p.strategy?.sections?`<section class="card"><div class="card-head"><h2>編輯五個欄位</h2></div><form id="strategy-edit-form" class="strategy-edit">${STRATEGY_KEYS.map(([key,label])=>`<label>${esc(label)}<textarea name="${key}" rows="5" maxlength="5000">${esc(p.strategy.sections[key]||'')}</textarea></label>`).join('')}<div class="strategy-actions"><button class="primary" type="submit">儲存欄位</button></div></form></section>`:'';
   const current=p.strategy?`<section class="card"><div class="card-head"><h2>策略企劃・目前版</h2></div>${strategyDocument(p,p.strategy)}</section>`:`<div class="empty-card"><div class="empty-icon">${icon('spark')}</div><h2>${ready?'尚未產生策略企劃':'尚未產生策略企劃'}</h2><p>確認需求後可複製 AI 指令；貼回會先預覽，套用後仍須人工檢查並標記完成。</p></div>`;
   return controls+current+edit+(p.strategyPrev?`<details class="card"><summary>上一版（${esc(timeText(p.strategyPrev.at))}）</summary>${strategyDocument(p,p.strategyPrev)}</details>`:'');
@@ -485,7 +503,7 @@ function renderLeads() {
   if (status === 'member' || status === 'offline') {
     head += `<div class="leads-account"><span>${esc(displayName || email)}</span><span aria-hidden="true">・</span><button type="button" data-action="lead-signout">登出</button></div>`;
     head += '<button type="button" class="lead-refresh" data-action="lead-refresh">重新整理</button>';
-    body = '<div id="leads-list" class="leads-list"><section aria-labelledby="pending-title"><h2 id="pending-title">待聯絡</h2><div data-lead-section="pending"></div></section><section aria-labelledby="contacted-title"><h2 id="contacted-title">已回報</h2><div data-lead-section="contacted"></div></section></div>';
+    body = '<div id="leads-list" class="leads-list"><div class="lead-tabs" role="tablist" aria-label="客戶名單分類"><button type="button" role="tab" id="lead-tab-pending" data-lead-tab="pending" aria-controls="lead-panel-pending" aria-selected="true">待聯絡 <span data-lead-count="pending">—</span></button><button type="button" role="tab" id="lead-tab-contacted" data-lead-tab="contacted" aria-controls="lead-panel-contacted" aria-selected="false">已回報 <span data-lead-count="contacted">—</span></button></div><p class="lead-messenger-hint">按 Messenger 會開啟收件匣並複製客人姓名，貼到搜尋欄即可找到對話；Messenger 只能在客人最後傳訊後一段時間內回覆，超過請改打電話。</p><section id="lead-panel-pending" role="tabpanel" aria-labelledby="lead-tab-pending" data-lead-panel="pending"><div data-lead-section="pending"></div></section><section id="lead-panel-contacted" role="tabpanel" aria-labelledby="lead-tab-contacted" data-lead-panel="contacted" hidden><div class="lead-filters" role="group" aria-label="聯絡結果篩選"><button type="button" data-lead-filter="all" aria-pressed="true">全部 <span data-filter-count></span></button><button type="button" data-lead-filter="contacted" aria-pressed="false">已聯絡 <span data-filter-count></span></button><button type="button" data-lead-filter="site_visit" aria-pressed="false">約丈量 <span data-filter-count></span></button><button type="button" data-lead-filter="not_interested" aria-pressed="false">沒興趣 <span data-filter-count></span></button><button type="button" data-lead-filter="unreachable" aria-pressed="false">聯絡不上 <span data-filter-count></span></button></div><div data-lead-section="contacted"></div></section></div>';
   }
   $('#leads-view').innerHTML = `<header class="leads-header">${head}</header><section class="leads-content">${body}</section>`;
   if (status === 'member') window.GenieLeads.activate();
@@ -538,6 +556,7 @@ function hideWorkspace() {
   toastAction = null;
   $('#toast').hidden = true;
   $('#rows').innerHTML = '';
+  $('#project-cards').innerHTML = '';
   $('#detail-view').innerHTML = '';
   $('#leads-view').innerHTML = '';
   document.title = 'Genie-Local';
@@ -570,6 +589,11 @@ function showAuth(auth) {
   }
   document.title = auth.status === 'signedOut' || auth.status === 'denied' ? '登入 Genie-Local' : 'Genie-Local';
 }
+const offlineObserver = new ResizeObserver(() => {
+  const banner = $('#offline-banner');
+  document.documentElement.style.setProperty('--offline-height', `${banner.hidden ? 0 : banner.getBoundingClientRect().height}px`);
+});
+offlineObserver.observe($('#offline-banner'));
 
 /* ================= 其他對話框 ================= */
 function showInfo(title,body){$('#info-title').innerHTML=esc(title);$('#info-body').innerHTML=body;$('#info-dialog').showModal();}
@@ -582,7 +606,7 @@ function showStrategyPrompt(){
 function showStrategyPaste(){
   const p=findProject(view.id);if(stepStatus(p,'brief').s!=='done')return;
   strategyPasteResult=null;strategyPasteText='';
-  showInfo('貼上 AI 回覆',`<div class="strategy-dialog-body"><p class="muted">按 AI 回答中程式碼框右上角的『複製』；沒有程式碼框時，長按回答 → 複製。再於下方長按貼上。iOS 詢問時請允許貼上。本站只讀取此文字框，不會讀取剪貼簿。</p><label>AI 回覆<textarea id="strategy-paste-text" rows="10" maxlength="30000" placeholder="在這裡貼上完整 AI 回覆"></textarea></label><div id="strategy-parse-result" aria-live="polite"></div><div class="dialog-footer strategy-footer"><button type="button" data-close>取消</button><button type="button" data-action="strategy-parse">預覽五欄</button><button type="button" class="primary" data-action="strategy-apply" disabled>套用</button></div></div>`);
+  showInfo('貼上 AI 回覆',`<div class="strategy-dialog-body"><p class="muted">按 AI 回答中程式碼框右上角的『複製』；沒有程式碼框時，長按回答 → 複製。Claude 若把內容開在側邊文件，按文件上的 Copy。再於下方長按貼上。iOS 詢問時請允許貼上。本站只讀取此文字框，不會讀取剪貼簿。</p><label>AI 回覆<textarea id="strategy-paste-text" rows="10" maxlength="30000" placeholder="在這裡貼上完整 AI 回覆"></textarea></label><div id="strategy-parse-result" aria-live="polite"></div><div class="dialog-footer strategy-footer"><button type="button" data-close>取消</button><button type="button" data-action="strategy-parse">預覽五欄</button><button type="button" class="primary" data-action="strategy-apply" disabled>套用</button></div></div>`);
 }
 function previewStrategyPaste(){
   const textarea=$('#strategy-paste-text');if(!textarea)return;
@@ -698,7 +722,10 @@ $('#auth-shell').addEventListener('submit',async e=>{
 $('#detail-view').addEventListener('input',e=>{if(e.target.matches('[data-est-field],[data-est-condition]'))estimateEdit(e.target,false);});
 $('#detail-view').addEventListener('change',e=>{if(e.target.matches('[data-est-field],[data-est-condition]'))estimateEdit(e.target,true);});
 $('#rows').addEventListener('change',e=>{const id=e.target.dataset.select;if(id){e.target.checked?selected.add(id):selected.delete(id);render();}});
-$('#select-all').addEventListener('change',e=>{current().forEach(p=>e.target.checked?selected.add(p.id):selected.delete(p.id));render();});
+$('#project-cards').addEventListener('change',e=>{const id=e.target.dataset.select;if(id){e.target.checked?selected.add(id):selected.delete(id);render();}});
+for(const checkbox of [$('#select-all'),$('#card-select-all')])checkbox.addEventListener('change',e=>{current().forEach(p=>e.target.checked?selected.add(p.id):selected.delete(p.id));render();});
+$('#project-cards').addEventListener('click',e=>{if(e.target.closest('a,button,label,input'))return;const card=e.target.closest('[data-open]');if(card)location.hash=projectHref(findProject(card.dataset.open),'brief');});
+$('#project-cards').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-open]')){e.preventDefault();location.hash=projectHref(findProject(e.target.dataset.open),'brief');}});
 // 快速新增
 $('#project-form').addEventListener('submit',e=>{e.preventDefault();const form=e.target;if(!form.elements.name.value.trim()){form.elements.name.setCustomValidity('請輸入專案名稱');form.elements.name.reportValidity();return;}const data=Object.fromEntries(new FormData(form));for(const f of ['name','contact','email','phone'])data[f]=data[f].trim();Object.assign(data,{done:false,notes:'',brief:{},steps:{},skip:{},source:{kind:'manual'},id:crypto.randomUUID()});if(!commit(()=>projects.unshift(data)))return;page=0;$('#editor').close();location.hash=`#/p/${encodeURIComponent(data.id)}/brief`;toast('專案已建立，接著補齊需求資料',{actionLabel:'開始填寫',onAction:()=>openDrawer(data.id,{section:sectionsFor(data.type)[1].id})});});
 $('#project-form').elements.name.addEventListener('input',e=>e.target.setCustomValidity(''));

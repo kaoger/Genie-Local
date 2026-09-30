@@ -1,5 +1,5 @@
 'use strict';
-const { test, expect, createProject, fillRequired, goStep, fillEstimate } = require('./helpers');
+const { test, expect, createProject, fillRequired, goStep, fillEstimate, projectItems } = require('./helpers');
 
 test.use({ viewport: { width: 375, height: 812 } });
 
@@ -11,7 +11,7 @@ test('驗收 14：375×812 清單、需求、估價與提案無整頁橫向溢�
     expect.soft(width, `${label}整頁寬度`).toBeLessThanOrEqual(375);
   }
   await expect(page).toHaveTitle('潛在客戶｜Genie-Local v4');
-  await expect(page.locator('#rows tr[data-id]')).toHaveCount(8);
+  await expect(projectItems(page)).toHaveCount(8);
   await expectNoOverflow('清單');
   await createProject(page);
   await fillRequired(page);

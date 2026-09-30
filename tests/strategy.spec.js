@@ -159,7 +159,7 @@ test('iPhone 複製丟失標記與概述標題時，第一段補入概述', asyn
   await ready(page);
   const result = await preview(page, fixture('chatgpt-ios-2026-09-30'));
   await assertSections(result, ['本案以收納與動線調整為主要目標。現場尺寸尚未確認，設計提案需保留調整空間。', '方向 1：梳理動線\n先確認主要走道與家具位置。\n方向 2：彈性收納\n依實際物品尺寸規劃收納區。', '預算尚未確定，先釐清工作優先順序。', '1. 哪些物品需要固定收納？\n2. 何時可以安排現場丈量？', '1. 整理兩組方向草圖。\n2. 安排丈量並核對需求。']);
-  await expect(result).toContainText('提案概述未找到標題，已用第一段文字代替，請核對');
+  await expect(result).toContainText('提案概述沒有標題，已把第一個標題前的文字全部放入，請刪除不屬於概述的句子');
   await expect(result).toContainText('找不到完整的 START／END 標記');
   await expect(result).not.toContainText('缺少欄位：提案概述');
   await expect(result).not.toContainText('無法歸類的原文');
@@ -192,15 +192,17 @@ test('兩層舊式標記可辨識，單獨標記不會列為原文', async ({ pa
 
 test('iPhone ChatGPT 長按原始樣本可完整拆出五欄', async ({ page }) => {
   await ready(page);
-  const result = await preview(page, fixture('chatgpt-ios-longpress'));
+  const raw = fixture('chatgpt-ios-longpress');
+  const result = await preview(page, raw);
   const contents = await result.locator('.strategy-preview > section p').allTextContents();
   expect(contents).toHaveLength(5);
-  expect(contents[0]).toContain('台中市 35 坪新成屋');
-  expect(contents[1]).toContain('方向 3：〈日式簡約融合〉');
-  expect(contents[2]).toContain('2026 年 8 月究竟為交屋月份');
-  expect(contents[3]).toContain('8. 全室裝修中');
-  expect(contents[4]).toContain('5. 待關鍵需求確認後');
-  for (const body of contents) expect(body).not.toContain('GENIE-STRATEGY-v1');
+  for (const [index, label] of labels.entries()) {
+    const start = raw.indexOf(`【${label}】`);
+    const end = index + 1 < labels.length ? raw.indexOf(`【${labels[index + 1]}】`, start) : raw.indexOf('<<GENIE-STRATEGY-v1:END', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(contents[index]).toBe(raw.slice(start + label.length + 2, end).trim());
+  }
   await expect(result).not.toContainText('無法歸類的原文');
   await expect(result).not.toContainText('找不到完整的 START／END 標記');
   await expect(page.locator('[data-action="strategy-apply"]')).toBeEnabled();
@@ -218,9 +220,42 @@ test('前後閒聊包住程式碼框時，框內五欄正確且閒聊進無法�
   await expect(result).not.toContainText('找不到完整的 START／END 標記');
 });
 
+test('裸標題、Markdown 標題及粗體標題的程式碼框均可辨識；多框選非空欄最多且同分取最後', async ({ page }) => {
+  await ready(page);
+  const blocks = [
+    '提案概述\n第一框',
+    '## 提案概述\n第二框概述\n**設計方向**\n第二框方向',
+    '提案概述\n最後框概述\n## 設計方向\n最後框方向',
+  ];
+  const result = await preview(page, blocks.map(body => `\`\`\`text\n${body}\n\`\`\``).join('\n'));
+  await assertSections(result, ['最後框概述', '最後框方向', '未辨識', '未辨識', '未辨識']);
+  await expect(result).toContainText('有多個程式碼框，請核對');
+});
+
+test('只有標記、沒有正文的欄位不計入多框非空分數', async ({ page }) => {
+  await ready(page);
+  const answer = '\`\`\`text\n【提案概述】\n【GENIE-STRATEGY-v1 結束】\n\`\`\`\n\`\`\`text\n【提案概述】\n有正文\n\`\`\`';
+  const result = await preview(page, answer);
+  await assertSections(result, ['有正文', '未辨識', '未辨識', '未辨識', '未辨識']);
+  await expect(result).toContainText('有多個程式碼框，請核對');
+});
+
+test('框外後續標題代表程式碼框提前結束，改用全文解析', async ({ page }) => {
+  await ready(page);
+  const result = await preview(page, '\`\`\`text\n【提案概述】\n概述\n\`\`\`\n【設計方向】\n方向\n【預算與時程提醒】\n預算');
+  await assertSections(result, ['概述', '方向', '預算', '未辨識', '未辨識']);
+  await expect(result).toContainText('程式碼框可能被提前結束');
+});
+
+test('ZWNJ 與 ZWJ 僅在兩側均為 CJK 或全形時移除', async ({ page }) => {
+  await ready(page);
+  const result = await preview(page, '【提\u200C案概述】\n👩\u200D💻 與 a\u200Cb 保留；中\u200D文移除。\n【設計方向】\n方向\n【預算與時程提醒】\n預算');
+  await assertSections(result, ['👩\u200D💻 與 a\u200Cb 保留；中文移除。', '方向', '預算', '未辨識', '未辨識']);
+});
+
 test('擴充的隱形字元不會妨礙標記和標題', async ({ page }) => {
   await ready(page);
-  const invisible = '\u00AD\u180E\u200B\u200C\u200D\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2060\u2061\u2062\u2063\u2064\uFEFF';
+  const invisible = '\u00AD\u180E\u200B\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2060\u2061\u2062\u2063\u2064\uFEFF';
   const bodies = ['概述', '方向 1：甲\n方向 2：乙', '預算', '問題', '整理內部工作順序'];
   const answer = `  <<GENIE-STRATEGY-v1:START${invisible}>>\n${labels.map((label, index) => `【${label.slice(0, 1)}${invisible}${label.slice(1)}】\n${bodies[index]}`).join('\n')}\n    <<GENIE-STRATEGY-v1:END${invisible}>>`;
   const result = await preview(page, answer);
@@ -235,6 +270,7 @@ test('策略頁與貼上對話框顯示程式碼框複製說明', async ({ page 
   await expect(page.locator('.strategy-workflow')).toContainText(instruction);
   await page.locator('[data-action="strategy-paste"]').click();
   await expect(page.locator('#info-dialog')).toContainText(instruction);
+  await expect(page.locator('#info-dialog')).toContainText('Claude 若把內容開在側邊文件，按文件上的 Copy');
 });
 
 test('BOM 與零寬字元夾在標題中仍可逐欄解析', async ({ page }) => {

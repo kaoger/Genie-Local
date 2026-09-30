@@ -11,8 +11,11 @@ const sections = {
 const results = { contacted: '已聯絡', site_visit: '約丈量', not_interested: '沒興趣', unreachable: '聯絡不上' };
 const grades = { hot: '🔥 高分', normal: '一般', low: '低' };
 let epoch = 0;
+let contactedTotalRequest = 0;
 let lists = {};
 let root = null;
+let activeTab = 'pending', selectedFilter = 'all';
+let totals = { pending: null, contacted: null }, filteredCount = null;
 const saving = new Set();
 let undoTimer;
 
@@ -46,6 +49,22 @@ function undoMinutes(lead) {
   return Number.isFinite(until) && until > Date.now() ? Math.ceil((until - Date.now()) / 60000) : 0;
 }
 function findLead(id) { return Object.values(lists).flatMap(state => state.items).find(item => String(item.id) === String(id)); }
+const countText = value => Number.isFinite(value) ? String(value) : '—';
+function renderNavigation() {
+  if (!root) return;
+  for (const kind of Object.keys(sections)) {
+    const tab = root.querySelector(`[data-lead-tab="${kind}"]`), panel = root.querySelector(`[data-lead-panel="${kind}"]`);
+    tab.setAttribute('aria-selected', String(activeTab === kind));
+    tab.tabIndex = activeTab === kind ? 0 : -1;
+    panel.hidden = activeTab !== kind;
+    root.querySelector(`[data-lead-count="${kind}"]`).textContent = countText(totals[kind]);
+  }
+  root.querySelectorAll('[data-lead-filter]').forEach(button => {
+    const selected = button.dataset.leadFilter === selectedFilter;
+    button.setAttribute('aria-pressed', String(selected));
+    button.querySelector('[data-filter-count]').textContent = selected ? countText(filteredCount) : '';
+  });
+}
 function card(lead, kind) {
   const phone = valueText(lead.phone);
   const tel = String(lead.phone ?? '').replace(/[^0-9+\-]/g, '');
@@ -68,15 +87,16 @@ function render(kind) {
   if (!active()) return;
   const state = lists[kind], target = root.querySelector(`[data-lead-section="${kind}"]`);
   if (!target) return;
-  const content = state.items.map(item => card(item, kind)).join('') || (state.loading ? '<p class="lead-state" role="status">讀取中…</p>' : state.error ? '' : `<p class="lead-state">${sections[kind].empty}</p>`);
+  const empty = kind === 'contacted' && selectedFilter !== 'all' ? '目前篩選沒有資料' : sections[kind].empty;
+  const content = state.items.map(item => card(item, kind)).join('') || (state.loading ? '<p class="lead-state" role="status">讀取中…</p>' : state.error ? '' : `<p class="lead-state">${empty}</p>`);
   target.innerHTML = `<div class="lead-cards">${content}</div>${state.error ? '<p class="lead-error" role="alert">讀取失敗，請按重新整理</p>' : ''}${state.more && !state.error ? `<button type="button" class="lead-more" data-lead-more="${kind}" ${state.loading ? 'disabled' : ''}>${state.loading ? '讀取中…' : '載入更多'}</button>` : ''}`;
 }
-async function query(kind, offset) {
+async function query(kind, offset, filter = selectedFilter, head = false) {
   const client = window.GenieAuth.getClient(), section = sections[kind];
   const run = () => {
-    let request = client.from('customer_leads').select(columns).eq('status', 'complete');
-    request = kind === 'pending' ? request.is('contact_result', null) : request.not('contact_result', 'is', null);
-    return request.order(section.order, { ascending: section.ascending }).range(offset, offset + section.size - 1);
+    let request = client.from('customer_leads').select(head ? 'id' : columns, offset === 0 ? { count: 'exact', ...(head ? { head: true } : {}) } : undefined).eq('status', 'complete');
+    request = kind === 'pending' ? request.is('contact_result', null) : filter === 'all' ? request.not('contact_result', 'is', null) : request.eq('contact_result', filter);
+    return head ? request : request.order(section.order, { ascending: section.ascending }).range(offset, offset + section.size - 1);
   };
   let response = await run();
   if (response.status === 401) {
@@ -97,47 +117,67 @@ async function load(kind) {
   if (!active() || window.GenieAuth.getState().status !== 'member') return;
   const state = lists[kind];
   if (state.loading || !state.more) return;
-  const current = epoch, offset = state.items.length;
+  const current = epoch, offset = state.items.length, filter = selectedFilter;
   state.loading = true;
   state.error = false;
   render(kind);
   try {
-    const response = await query(kind, offset);
-    if (current !== epoch || !active() || !response) return;
+    const response = await query(kind, offset, filter);
+    if (current !== epoch || !active() || !response || state !== lists[kind]) return;
     if (response.error) throw response.error;
     const rows = Array.isArray(response.data) ? response.data : [];
     state.items.push(...rows);
-    state.more = rows.length === sections[kind].size;
+    if (offset === 0) {
+      const count = Number.isFinite(response.count) ? response.count : null;
+      state.total = count;
+      if (kind === 'pending') totals.pending = count;
+      if (kind === 'contacted') filteredCount = count;
+      renderNavigation();
+    }
+    state.more = rows.length === sections[kind].size && (!Number.isFinite(state.total) || state.items.length < state.total);
   } catch {
-    if (current !== epoch || !active()) return;
+    if (current !== epoch || !active() || state !== lists[kind]) return;
     state.error = true;
   } finally {
-    if (current === epoch && active()) { state.loading = false; render(kind); }
+    if (current === epoch && active() && state === lists[kind]) { state.loading = false; render(kind); }
   }
+}
+async function loadContactedTotal() {
+  const current = ++contactedTotalRequest;
+  try {
+    const response = await query('contacted', 0, 'all', true);
+    if (current !== contactedTotalRequest || !active() || !response || response.error) return;
+    totals.contacted = Number.isFinite(response.count) ? response.count : null;
+    renderNavigation();
+  } catch {} // 讀取失敗時保留上一次有效總數。
 }
 function refresh() {
   if (!active()) return;
   ++epoch;
   lists = Object.fromEntries(Object.keys(sections).map(kind => [kind, { items: [], more: true, loading: false, error: false }]));
+  renderNavigation();
   if (window.GenieAuth.getState().status === 'offline') { showOffline(); return; }
   Object.keys(sections).forEach(kind => { render(kind); load(kind); });
+  loadContactedTotal();
 }
 function showOffline() {
   if (!active()) return;
-  ++epoch;
+  ++epoch; ++contactedTotalRequest;
+  totals = { pending: null, contacted: null }; filteredCount = null;
   lists = Object.fromEntries(Object.keys(sections).map(kind => [kind, { items: [], more: false, loading: false, error: true }]));
+  renderNavigation();
   Object.keys(sections).forEach(render);
 }
 function activate() {
   root = $('#leads-list');
   if (root) {
-    root.insertAdjacentHTML('afterbegin', '<p class="lead-messenger-hint">按 Messenger 會開啟收件匣並複製客人姓名，貼到搜尋欄即可找到對話；Messenger 只能在客人最後傳訊後一段時間內回覆，超過請改打電話。</p>');
+    renderNavigation();
     refresh();
     clearInterval(undoTimer);
     undoTimer = setInterval(() => { if (active()) render('contacted'); }, 30000);
   }
 }
-function deactivate() { ++epoch; root = null; clearInterval(undoTimer); }
+function deactivate() { ++epoch; ++contactedTotalRequest; root = null; clearInterval(undoTimer); }
 async function saveResult(cardElement, value) {
   const id = cardElement.dataset.leadId;
   if (!id || !Object.hasOwn(results, value) || saving.has(id)) return;
@@ -165,7 +205,8 @@ async function saveResult(cardElement, value) {
     if (!Array.isArray(response.data) || response.data.length === 0) { await changedNotice(id, current); return; }
     const saved = response.data[0];
     refresh();
-    notice(`已記錄：${results[value]}`, undoMinutes(saved) ? { actionLabel: '收回', onAction: () => undoResult(saved) } : undefined);
+    const hiddenByFilter = selectedFilter !== 'all' && selectedFilter !== value;
+    notice(hiddenByFilter ? `已記錄為${results[value]}（目前篩選未顯示）` : `已記錄：${results[value]}`, undoMinutes(saved) ? { actionLabel: '收回', onAction: () => undoResult(saved) } : undefined);
   } catch {
     if (current === epoch && active()) notice('儲存失敗，請稍後再試');
   } finally {
@@ -229,6 +270,17 @@ async function openMessenger(lead) {
   } catch { notice(`請到收件匣搜尋：${name}`); }
 }
 $('#leads-view').addEventListener('click', event => {
+  const tab = event.target.closest('[data-lead-tab]');
+  if (tab) { activeTab = tab.dataset.leadTab; renderNavigation(); $('main').scrollTop = 0; tab.focus(); return; }
+  const filter = event.target.closest('[data-lead-filter]');
+  if (filter) {
+    if (selectedFilter === filter.dataset.leadFilter) return;
+    selectedFilter = filter.dataset.leadFilter;
+    filteredCount = null;
+    lists.contacted = { items: [], more: true, loading: false, error: false };
+    renderNavigation(); render('contacted'); load('contacted');
+    return;
+  }
   const result = event.target.closest('[data-lead-result]');
   if (result) { saveResult(result.closest('.lead-card'), result.dataset.leadResult); return; }
   const undo = event.target.closest('[data-lead-undo]');

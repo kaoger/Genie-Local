@@ -18,7 +18,7 @@ async function installMember(page) {
     if (url.pathname === '/rest/v1/app_admins')
       return route.fulfill({ status: 200, headers, body: '[{"display_name":"測試成員","active":true}]' });
     if (url.pathname === '/auth/v1/logout') return route.fulfill({ status: 204, headers });
-    if (url.pathname === '/rest/v1/customer_leads') return route.fulfill({ status: 200, headers, body: '[]' });
+    if (url.pathname === '/rest/v1/customer_leads') return route.fulfill({ status: 200, headers: { ...headers, 'content-range': '*/0', 'access-control-expose-headers': 'content-range' }, body: '[]' });
     return route.fulfill({ status: 500, headers, body: '{}' });
   });
 }

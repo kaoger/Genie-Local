@@ -33,6 +33,7 @@
       <header><h1>潛在客戶</h1></header>
       <section class="content" aria-label="客戶清單">
         <div class="selection-bar" hidden><span id="selected-count"></span><button data-action="delete-selected">刪除所選</button><button data-action="clear-selection">取消選取</button></div>
+        <label class="card-select-all"><input id="card-select-all" type="checkbox">全選本頁</label>
         <div class="table-scroll" role="region" aria-label="客戶資料表，可左右捲動" tabindex="0">
           <table>
             <colgroup><col style="width:3%"><col style="width:12%"><col style="width:6%"><col style="width:8%"><col style="width:9%"><col style="width:12%"><col style="width:9%"><col style="width:8%"><col style="width:8%"><col style="width:17%"><col style="width:8%"></colgroup>
@@ -40,6 +41,8 @@
             <tbody id="rows"></tbody>
           </table>
         </div>
+        <div id="project-cards" class="project-cards" aria-label="客戶卡片"></div>
+        <p class="card-example"><span class="example-badge">範例</span> 示範品牌 / Demo Brand 是展示排版的範例，不是客戶資料。</p>
         <footer><div class="pagination"><button id="prev" aria-label="上一頁" data-icon="left"></button><span id="pages"></span><button id="next" aria-label="下一頁" data-icon="right"></button></div><span id="count"></span></footer>
       </section>
     </div>
