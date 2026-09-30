@@ -65,8 +65,14 @@ test('指令使用明確白名單、遮罩與類型用語；複製時保存待�
     await page.locator('[data-action="strategy-prompt"]').click();
     const prompt = await page.locator('#strategy-prompt-text').inputValue();
     expect(prompt).toContain('版本：strategy-v1');
-    expect(prompt).toContain('<<<GENIE-STRATEGY-v1:START>>>');
+    expect(prompt).toContain('【GENIE-STRATEGY-v1 開始】');
+    expect(prompt).toContain('【GENIE-STRATEGY-v1 結束】');
     expect(prompt).toContain('【提案概述】');
+    expect(prompt).toContain('整份輸出必須放進單一程式碼框');
+    expect(prompt).toContain('框外不要說任何話');
+    expect(prompt).toContain('框內不要再有其他程式碼框');
+    expect(prompt).toMatch(/```text\n【GENIE-STRATEGY-v1 開始】/);
+    expect(prompt).toMatch(/【GENIE-STRATEGY-v1 結束】\n```$/);
     expect(prompt).toContain(phrase);
     expect(prompt).toContain('[電話]');
     expect(prompt).toContain('[信箱]');
@@ -138,6 +144,97 @@ test('只有全形標記與【】標題時可逐欄解析', async ({ page }) => 
   await assertSections(result, bodies);
   await expect(result).not.toContainText('找不到完整的 START／END 標記');
   await expect(result).not.toContainText('無法歸類的原文');
+});
+
+test('新標記標準樣本可逐欄解析，標記不會進入欄位', async ({ page }) => {
+  await ready(page);
+  const result = await preview(page, standard.replace(sampleNote, '').trim());
+  await assertSections(result, ['已知需求為居家空間調整，以收納與動線為優先。格局與現場尺寸仍需核對。', '方向 1：清楚動線\n以公共空間的走道整理為核心；取捨是展示面積。\n方向 2：彈性收納\n以可變用途的收納區為核心；須確認實際物品尺寸。', '若預算尚未確定，先列工作優先順序。交屋月份仍待確認。', '1. 哪些物品需要固定收納？\n2. 現場丈量可安排在何時？', '1. 整理參考視覺。\n2. 安排丈量並核對需求。']);
+  await expect(result).not.toContainText('找不到完整的 START／END 標記');
+  await expect(result).not.toContainText('無法歸類的原文');
+  await expect(result).not.toContainText('GENIE-STRATEGY-v1');
+});
+
+test('iPhone 複製丟失標記與概述標題時，第一段補入概述', async ({ page }) => {
+  await ready(page);
+  const result = await preview(page, fixture('chatgpt-ios-2026-09-30'));
+  await assertSections(result, ['本案以收納與動線調整為主要目標。現場尺寸尚未確認，設計提案需保留調整空間。', '方向 1：梳理動線\n先確認主要走道與家具位置。\n方向 2：彈性收納\n依實際物品尺寸規劃收納區。', '預算尚未確定，先釐清工作優先順序。', '1. 哪些物品需要固定收納？\n2. 何時可以安排現場丈量？', '1. 整理兩組方向草圖。\n2. 安排丈量並核對需求。']);
+  await expect(result).toContainText('提案概述未找到標題，已用第一段文字代替，請核對');
+  await expect(result).toContainText('找不到完整的 START／END 標記');
+  await expect(result).not.toContainText('缺少欄位：提案概述');
+  await expect(result).not.toContainText('無法歸類的原文');
+  await expect(page.locator('[data-action="strategy-apply"]')).toBeEnabled();
+});
+
+test('兩層舊式標記可辨識，單獨標記不會列為原文', async ({ page }) => {
+  await ready(page);
+  const bodies = ['舊式概述', '方向 1：甲\n方向 2：乙', '舊式預算', '舊式問題', '舊式下一步'];
+  const answer = `<<GENIE-STRATEGY-v1:START>>\n${labels.map((label, index) => `【${label}】\n${bodies[index]}`).join('\n')}\n<<GENIE-STRATEGY-v1:END>>`;
+  let result = await preview(page, answer);
+  await assertSections(result, bodies);
+  await expect(result).not.toContainText('找不到完整的 START／END 標記');
+  await expect(result).not.toContainText('無法歸類的原文');
+  await closePreview(page);
+  result = await preview(page, `＜ genie-strategy-v1 start ＞\n${labels.map((label, index) => `【${label}】\n${bodies[index]}`).join('\n')}\n＜ genie-strategy-v1 end ＞`);
+  await assertSections(result, bodies);
+  await expect(result).not.toContainText('找不到完整的 START／END 標記');
+  await closePreview(page);
+  result = await preview(page, `［ GENIE-STRATEGY-v1 開始 ］\n${labels.map((label, index) => `【${label}】\n${bodies[index]}`).join('\n')}\n[ GENIE-STRATEGY-v1 結束 ]`);
+  await assertSections(result, bodies);
+  await expect(result).not.toContainText('找不到完整的 START／END 標記');
+  await closePreview(page);
+  result = await preview(page, `<<GENIE-STRATEGY-v1:START>>\n${labels.map((label, index) => `【${label}】\n${bodies[index]}`).join('\n')}`);
+  await assertSections(result, bodies);
+  await expect(result).toContainText('找不到完整的 START／END 標記');
+  await expect(result).not.toContainText('無法歸類的原文');
+  await expect(result).not.toContainText('GENIE-STRATEGY-v1');
+});
+
+test('iPhone ChatGPT 長按原始樣本可完整拆出五欄', async ({ page }) => {
+  await ready(page);
+  const result = await preview(page, fixture('chatgpt-ios-longpress'));
+  const contents = await result.locator('.strategy-preview > section p').allTextContents();
+  expect(contents).toHaveLength(5);
+  expect(contents[0]).toContain('台中市 35 坪新成屋');
+  expect(contents[1]).toContain('方向 3：〈日式簡約融合〉');
+  expect(contents[2]).toContain('2026 年 8 月究竟為交屋月份');
+  expect(contents[3]).toContain('8. 全室裝修中');
+  expect(contents[4]).toContain('5. 待關鍵需求確認後');
+  for (const body of contents) expect(body).not.toContain('GENIE-STRATEGY-v1');
+  await expect(result).not.toContainText('無法歸類的原文');
+  await expect(result).not.toContainText('找不到完整的 START／END 標記');
+  await expect(page.locator('[data-action="strategy-apply"]')).toBeEnabled();
+});
+
+test('前後閒聊包住程式碼框時，框內五欄正確且閒聊進無法歸類', async ({ page }) => {
+  await ready(page);
+  const bodies = ['框內概述', '方向 1：甲\n方向 2：乙', '框內預算', '框內問題', '框內下一步'];
+  const answer = `這是前言。\n\`\`\`text\n【GENIE-STRATEGY-v1 開始】\n${labels.map((label, index) => `【${label}】\n${bodies[index]}`).join('\n')}\n【GENIE-STRATEGY-v1 結束】\n\`\`\`\n這是後記。`;
+  const result = await preview(page, answer);
+  await assertSections(result, bodies);
+  const unclassified = result.locator('.strategy-preview > section').last();
+  await expect(unclassified.locator('h4')).toHaveText('無法歸類的原文');
+  await expect(unclassified.locator('p')).toHaveText('這是前言。\n這是後記。');
+  await expect(result).not.toContainText('找不到完整的 START／END 標記');
+});
+
+test('擴充的隱形字元不會妨礙標記和標題', async ({ page }) => {
+  await ready(page);
+  const invisible = '\u00AD\u180E\u200B\u200C\u200D\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2060\u2061\u2062\u2063\u2064\uFEFF';
+  const bodies = ['概述', '方向 1：甲\n方向 2：乙', '預算', '問題', '整理內部工作順序'];
+  const answer = `  <<GENIE-STRATEGY-v1:START${invisible}>>\n${labels.map((label, index) => `【${label.slice(0, 1)}${invisible}${label.slice(1)}】\n${bodies[index]}`).join('\n')}\n    <<GENIE-STRATEGY-v1:END${invisible}>>`;
+  const result = await preview(page, answer);
+  await assertSections(result, bodies);
+  await expect(result).not.toContainText('找不到完整的 START／END 標記');
+  await expect(result).not.toContainText('無法歸類的原文');
+});
+
+test('策略頁與貼上對話框顯示程式碼框複製說明', async ({ page }) => {
+  await ready(page);
+  const instruction = '按 AI 回答中程式碼框右上角的『複製』；沒有程式碼框時，長按回答 → 複製';
+  await expect(page.locator('.strategy-workflow')).toContainText(instruction);
+  await page.locator('[data-action="strategy-paste"]').click();
+  await expect(page.locator('#info-dialog')).toContainText(instruction);
 });
 
 test('BOM 與零寬字元夾在標題中仍可逐欄解析', async ({ page }) => {

@@ -91,10 +91,11 @@ const STRATEGY_INSTRUCTIONS=`你是台灣設計公司的提案顧問，要為內
 6. 不要發明材料品牌、法規結論、結構可否變更、水電狀況、工期天數、單價；屋況、電梯、交屋月份只能變成風險提醒或待確認問題。
 7. 設計方向 2～3 個，彼此要有差異；每個含名稱、對應哪些已知需求、空間（或設計）重點、一項取捨或待驗證條件。
 8. 關鍵欄位未填時，不要用假想家庭或假想格局補滿，改列成問題。
-9. 不要用 Markdown 標題（不要 #）、不要表格、不要程式碼區塊；條列可以。標記之外不要說任何話。
+9. 整份輸出必須放進單一程式碼框，以 \`\`\`text 開頭、\`\`\` 結尾；框外不要說任何話。框內不要再有其他程式碼框；不要用 Markdown 標題（不要 #）或表格，條列可以。
 
-【輸出格式——標記與【】標題必須原樣、各占一行，不增刪標題】
-<<<GENIE-STRATEGY-v1:START>>>
+【輸出格式——整份內容放進單一程式碼框；框內依序是開始標記、五個【】標題與內容、結束標記；標記與標題必須原樣、各占一行，不增刪標題】
+\`\`\`text
+【GENIE-STRATEGY-v1 開始】
 【提案概述】
 （目標、已確定的條件、目前最大限制。四到七句。）
 【設計方向】
@@ -109,7 +110,8 @@ const STRATEGY_INSTRUCTIONS=`你是台灣設計公司的提案顧問，要為內
 （只問會改變設計或報價的問題，五到八題，不重複已知資料。）
 【下一步】
 （本公司內部下一步三到五點，對準視覺發想／丈量／估價；不寫請客戶付款或簽約。）
-<<<GENIE-STRATEGY-v1:END>>>`;
+【GENIE-STRATEGY-v1 結束】
+\`\`\``;
 function strategyFields(type){return STRATEGY_FIELDS[type==='居家裝潢設計'?'home':isSpace(type)?'space':'general'];}
 function strategySnapshot(p){const fields=allFields(p.type);return {type:p.type,brief:Object.fromEntries(strategyFields(p.type).map(k=>{const f=fields.find(f=>f.key===k);return [k,fieldNorm(f,p.brief?.[k])];}))};}
 function maskStrategyText(value){return String(value).replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,'[信箱]').replace(/(?<!\d)09(?:[\s-]*\d){8}(?!\d)/g,'[電話]').replace(/(?<!\d)0\d{1,2}-?\d{6,8}(?!\d)/g,'[電話]');}
@@ -120,18 +122,26 @@ function strategyPrompt(p){
 }
 function parseStrategy(raw){
   const original=String(raw??''),warnings=[],sections=Object.fromEntries(STRATEGY_KEYS.map(([key])=>[key,'']));
-  let input=original.replace(/[\uFEFF\u200B-\u200D\u2060]/g,'').replace(/\r\n?/g,'\n').trim();
-  const fence=input.match(/^```[^\n]*\n([\s\S]*?)\n```\s*$/);if(fence)input=fence[1].trim();
-  const marker=/[<＜]{3}\s*GENIE-STRATEGY-v1:(START|END)\s*[>＞]{3}/gi;
-  const matches=[...input.matchAll(marker)],start=matches.find(m=>m[1].toUpperCase()==='START'),end=matches.find(m=>m[1].toUpperCase()==='END'&&(!start||m.index>start.index));
-  let outside='';
-  if(start&&end){outside=(input.slice(0,start.index)+'\n'+input.slice(end.index+end[0].length)).trim();input=input.slice(start.index+start[0].length,end.index).trim();}
-  else warnings.push('找不到完整的 START／END 標記，已用全文解析。');
+  let input=original.replace(/[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g,'').replace(/\r\n?/g,'\n').trim();
   const title='提案概述|設計方向|預算與時程提醒|需要向客戶確認的問題|下一步';
+  const fence=/^[ \t]*```[^\n]*\n([\s\S]*?)\n[ \t]*```[ \t]*(?=\n|$)/gm;
+  let outside='';
+  for(const match of input.matchAll(fence)){
+    if(!new RegExp(`GENIE-STRATEGY-v1|【\\s*(?:${title})\\s*】`,'i').test(match[1]))continue;
+    outside=(input.slice(0,match.index)+'\n'+input.slice(match.index+match[0].length)).trim();
+    input=match[1].trim();
+    break;
+  }
+  const marker=/^[^\S\n]*(?:[【［\[][^\S\n]*GENIE-STRATEGY-v1[^\S\n]*(開始|結束)[^\S\n]*[】］\]]|[<＜]{1,3}[^\S\n]*GENIE-STRATEGY-v1[^\S\n]*(?::|[^\S\n]+)[^\S\n]*(START|END)[^\S\n]*[>＞]{1,3})[^\S\n]*$/gim;
+  const matches=[...input.matchAll(marker)],kind=m=>m[1]||m[2].toUpperCase(),start=matches.find(m=>['開始','START'].includes(kind(m))),end=matches.find(m=>['結束','END'].includes(kind(m))&&(!start||m.index>start.index));
+  const withoutMarkers=text=>text.replace(marker,'').trim();
+  if(start&&end){const around=withoutMarkers(input.slice(0,start.index)+'\n'+input.slice(end.index+end[0].length));outside=[outside,around].filter(Boolean).join('\n');input=withoutMarkers(input.slice(start.index+start[0].length,end.index));}
+  else warnings.push('找不到完整的 START／END 標記，已用全文解析。');
+  if(!start||!end)input=withoutMarkers(input);
   const label=new RegExp(`【\\s*(${title})\\s*】|(^|\\n)[ \\t]*(?:#{1,6}[ \\t]*)?(?:\\*\\*)?(${title})(?:\\*\\*)?[ \\t]*(?=\\n|$)`,'g');
   const hits=[...input.matchAll(label)].map(m=>({index:m.index,end:m.index+m[0].length,title:m[1]||m[3]}));
   let unclassified=outside;
-  if(hits.length){const before=input.slice(0,hits[0].index).trim();if(before)unclassified+=(unclassified?'\n':'')+before;
+  if(hits.length){const before=input.slice(0,hits[0].index).trim();if(before){if(!hits.some(h=>h.title==='提案概述')){sections.overview=before;warnings.push('提案概述未找到標題，已用第一段文字代替，請核對');}else unclassified+=(unclassified?'\n':'')+before;}
     hits.forEach((h,i)=>{const key=STRATEGY_KEYS.find(([,name])=>name===h.title)[0],body=input.slice(h.end,hits[i+1]?.index??input.length).trim();if(sections[key])warnings.push(`重複欄位：${h.title}`);sections[key]+=(sections[key]&&body?'\n':'')+body;});
   }else if(input)unclassified+=(unclassified?'\n':'')+input;
   if(!hits.length)warnings.push('請確認有複製到整段回答');
@@ -345,7 +355,7 @@ function strategyDocument(p,strategy){
 }
 function strategyBody(p){
   const ready=stepStatus(p,'brief').s==='done';
-  const controls=`<section class="card strategy-workflow"><div class="card-head"><h2>AI 草稿・複製貼上</h2></div><p class="muted">先預覽遮罩後的指令，再複製到自己的 AI App。用 App 的複製鈕複製整段回答，回來貼入文字框。iOS 若詢問「允許貼上」，請按允許。資料會進你的 AI 帳號，本站無法控制該公司的訓練或記憶設定。</p><div class="strategy-actions"><button class="primary" data-action="strategy-prompt" ${ready?'':'disabled'}>複製 AI 指令</button><button data-action="strategy-paste" ${ready?'':'disabled'}>貼上 AI 回覆</button><button data-action="gen-strategy" ${ready?'':'disabled'}>略過 AI，產生示範草稿</button></div>${p.strategyPending?`<p class="muted">待回覆指令：${esc(timeText(p.strategyPending.at))}</p>`:''}</section>`;
+  const controls=`<section class="card strategy-workflow"><div class="card-head"><h2>AI 草稿・複製貼上</h2></div><p class="muted">先預覽遮罩後的指令，再複製到自己的 AI App。按 AI 回答中程式碼框右上角的『複製』；沒有程式碼框時，長按回答 → 複製。回來貼入文字框。iOS 若詢問「允許貼上」，請按允許。資料會進你的 AI 帳號，本站無法控制該公司的訓練或記憶設定。</p><div class="strategy-actions"><button class="primary" data-action="strategy-prompt" ${ready?'':'disabled'}>複製 AI 指令</button><button data-action="strategy-paste" ${ready?'':'disabled'}>貼上 AI 回覆</button><button data-action="gen-strategy" ${ready?'':'disabled'}>略過 AI，產生示範草稿</button></div>${p.strategyPending?`<p class="muted">待回覆指令：${esc(timeText(p.strategyPending.at))}</p>`:''}</section>`;
   const edit=p.strategy?.sections?`<section class="card"><div class="card-head"><h2>編輯五個欄位</h2></div><form id="strategy-edit-form" class="strategy-edit">${STRATEGY_KEYS.map(([key,label])=>`<label>${esc(label)}<textarea name="${key}" rows="5" maxlength="5000">${esc(p.strategy.sections[key]||'')}</textarea></label>`).join('')}<div class="strategy-actions"><button class="primary" type="submit">儲存欄位</button></div></form></section>`:'';
   const current=p.strategy?`<section class="card"><div class="card-head"><h2>策略企劃・目前版</h2></div>${strategyDocument(p,p.strategy)}</section>`:`<div class="empty-card"><div class="empty-icon">${icon('spark')}</div><h2>${ready?'尚未產生策略企劃':'尚未產生策略企劃'}</h2><p>確認需求後可複製 AI 指令；貼回會先預覽，套用後仍須人工檢查並標記完成。</p></div>`;
   return controls+current+edit+(p.strategyPrev?`<details class="card"><summary>上一版（${esc(timeText(p.strategyPrev.at))}）</summary>${strategyDocument(p,p.strategyPrev)}</details>`:'');
@@ -572,7 +582,7 @@ function showStrategyPrompt(){
 function showStrategyPaste(){
   const p=findProject(view.id);if(stepStatus(p,'brief').s!=='done')return;
   strategyPasteResult=null;strategyPasteText='';
-  showInfo('貼上 AI 回覆',`<div class="strategy-dialog-body"><p class="muted">用 AI App 的「複製」鈕複製整段回答，再於下方長按貼上。iOS 詢問時請允許貼上。本站只讀取此文字框，不會讀取剪貼簿。</p><label>AI 回覆<textarea id="strategy-paste-text" rows="10" maxlength="30000" placeholder="在這裡貼上完整 AI 回覆"></textarea></label><div id="strategy-parse-result" aria-live="polite"></div><div class="dialog-footer strategy-footer"><button type="button" data-close>取消</button><button type="button" data-action="strategy-parse">預覽五欄</button><button type="button" class="primary" data-action="strategy-apply" disabled>套用</button></div></div>`);
+  showInfo('貼上 AI 回覆',`<div class="strategy-dialog-body"><p class="muted">按 AI 回答中程式碼框右上角的『複製』；沒有程式碼框時，長按回答 → 複製。再於下方長按貼上。iOS 詢問時請允許貼上。本站只讀取此文字框，不會讀取剪貼簿。</p><label>AI 回覆<textarea id="strategy-paste-text" rows="10" maxlength="30000" placeholder="在這裡貼上完整 AI 回覆"></textarea></label><div id="strategy-parse-result" aria-live="polite"></div><div class="dialog-footer strategy-footer"><button type="button" data-close>取消</button><button type="button" data-action="strategy-parse">預覽五欄</button><button type="button" class="primary" data-action="strategy-apply" disabled>套用</button></div></div>`);
 }
 function previewStrategyPaste(){
   const textarea=$('#strategy-paste-text');if(!textarea)return;
