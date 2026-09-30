@@ -191,6 +191,16 @@ function normalizeProject(p){
     const snap=p[name].snapshot;p[name].snapshot=strategySnapshot({type:snap.type||p.type,brief:snap.brief||{}});
   }
   if(p.strategyPending?.snapshot){const snap=p.strategyPending.snapshot;p.strategyPending.snapshot=strategySnapshot({type:snap.type||p.type,brief:snap.brief||{}});}
+  if(!Array.isArray(p.strategyCompare))p.strategyCompare=[];
+  p.strategyCompare=p.strategyCompare.filter(item=>item&&typeof item==='object'&&!Array.isArray(item)).slice(-3).map(item=>({
+    at:typeof item.at==='string'?item.at:'',
+    source:['ChatGPT','Gemini','Claude','其他'].includes(item.source)?item.source:'其他',
+    sections:Object.fromEntries(STRATEGY_KEYS.map(([key])=>[key,typeof item.sections?.[key]==='string'?item.sections[key]:''])),
+    snapshot:strategySnapshot({type:typeof item.snapshot?.type==='string'?item.snapshot.type:p.type,brief:item.snapshot?.brief||{}}),
+    warnings:Array.isArray(item.warnings)?item.warnings.filter(w=>typeof w==='string'):[],
+    instructionAt:typeof item.instructionAt==='string'?item.instructionAt:null,
+    oldInstruction:item.oldInstruction===true
+  }));
   function migrateBasis(id,basis){
     if(!basis)return basis;
     if(id==='strategy'&&basis.req&&!basis.req.brief)basis.req=strategySnapshot({type:basis.req.type||p.type,brief:basis.req});
@@ -371,12 +381,26 @@ function strategyDocument(p,strategy){
   const rows=allFields(fake.type).filter(f=>f.req&&!isEmpty(getVal(fake,f))).map(f=>`<tr><th scope="row">${esc(f.label)}</th><td>${esc(display(f,getVal(fake,f)))}</td></tr>`).join('');
   return `<div class="doc"><p class="muted">示範內容・${esc(timeText(strategy.at))}</p><h3>提案概述</h3><table class="doc-table"><tbody><tr><th scope="row">需求類型</th><td>${esc(fake.type)}</td></tr>${rows}</tbody></table><h3>下一步</h3><ul><li>和客戶確認需求總覽內容是否正確。</li><li>依照風格與預算整理 2～3 個設計方向。</li><li>完成後進入「視覺發想」。</li></ul></div>`;
 }
+const strategySame=(a,sections,snapshot)=>!!a&&equal(a.sections??null,sections)&&equal(a.snapshot??null,snapshot);
+const strategyCopyWarn=p=>!!p.strategyPending&&(!(Number(p.strategyPending.applied)||Number(p.strategyPending.compared))||!equal(p.strategyPending.snapshot,strategySnapshot(p)));
+function strategyCompareBody(p){
+  if(!Array.isArray(p.strategyCompare))return '';
+  const items=p.strategyCompare.map((item,index)=>({item,index})).filter(({item})=>item&&typeof item==='object'&&!Array.isArray(item)&&item.sections&&typeof item.sections==='object'&&!Array.isArray(item.sections));
+  if(!items.length)return '';
+  return `<section class="card strategy-compare"><div class="card-head"><h2>其他 AI 的回答</h2></div><div class="strategy-compare-list">${items.map(({item,index})=>{
+    const changed=!equal(item.snapshot,strategySnapshot(p));
+    const warnings=Array.isArray(item.warnings)?item.warnings.filter(w=>typeof w==='string'):[];
+    return `<details class="strategy-compare-item"><summary>${esc(item.source||'其他')}・${esc(timeText(item.at))}${item.oldInstruction?' <span class="strategy-compare-tag">舊指令</span>':''}</summary><div class="strategy-compare-content">${changed?'<p class="strategy-warning">這份對應的是複製當時的需求，與現在不同</p>':''}${warnings.length?`<div class="strategy-warnings">${warnings.map(w=>`<p>${esc(w)}</p>`).join('')}</div>`:''}${strategyDocument(p,item)}<div class="strategy-actions"><button type="button" data-strategy-use="${index}">改用這份當目前版</button><button type="button" data-strategy-remove="${index}">刪除這份</button></div></div></details>`;
+  }).join('')}</div></section>`;
+}
 function strategyBody(p){
   const ready=stepStatus(p,'brief').s==='done';
-  const controls=`<section class="card strategy-workflow"><div class="card-head"><h2>AI 草稿・複製貼上</h2></div><p class="muted">先預覽遮罩後的指令，再複製到自己的 AI App。按 AI 回答中程式碼框右上角的『複製』；沒有程式碼框時，長按回答 → 複製。Claude 若把內容開在側邊文件，按文件上的 Copy。回來貼入文字框。iOS 若詢問「允許貼上」，請按允許。資料會進你的 AI 帳號，本站無法控制該公司的訓練或記憶設定。</p><div class="strategy-actions"><button class="primary" data-action="strategy-prompt" ${ready?'':'disabled'}>複製 AI 指令</button><button data-action="strategy-paste" ${ready?'':'disabled'}>貼上 AI 回覆</button><button data-action="gen-strategy" ${ready?'':'disabled'}>略過 AI，產生示範草稿</button></div>${p.strategyPending?`<p class="muted">待回覆指令：${esc(timeText(p.strategyPending.at))}</p>`:''}</section>`;
+  const pending=p.strategyPending;
+  const pendingLabel=pending?`<p class="muted">這次指令：${esc(timeText(pending.at))}${Number(pending.applied)||Number(pending.compared)?`（已套用 ${Number(pending.applied)||0} 份、比較 ${Number(pending.compared)||0} 份）`:''}</p>`:'';
+  const controls=`<section class="card strategy-workflow"><div class="card-head"><h2>AI 草稿・複製貼上</h2></div><p class="muted">先預覽遮罩後的指令，再複製到自己的 AI App。按 AI 回答中程式碼框右上角的『複製』；沒有程式碼框時，長按回答 → 複製。Claude 若把內容開在側邊文件，按文件上的 Copy。回來貼入文字框。iOS 若詢問「允許貼上」，請按允許。資料會進你的 AI 帳號，本站無法控制該公司的訓練或記憶設定。</p><div class="strategy-actions"><button class="primary" data-action="strategy-prompt" ${ready?'':'disabled'}>複製 AI 指令</button><button data-action="strategy-paste" ${ready?'':'disabled'}>貼上 AI 回覆</button><button data-action="gen-strategy" ${ready?'':'disabled'}>略過 AI，產生示範草稿</button></div>${pendingLabel}</section>`;
   const edit=p.strategy?.sections?`<section class="card"><div class="card-head"><h2>編輯五個欄位</h2></div><form id="strategy-edit-form" class="strategy-edit">${STRATEGY_KEYS.map(([key,label])=>`<label>${esc(label)}<textarea name="${key}" rows="5" maxlength="5000">${esc(p.strategy.sections[key]||'')}</textarea></label>`).join('')}<div class="strategy-actions"><button class="primary" type="submit">儲存欄位</button></div></form></section>`:'';
   const current=p.strategy?`<section class="card"><div class="card-head"><h2>策略企劃・目前版</h2></div>${strategyDocument(p,p.strategy)}</section>`:`<div class="empty-card"><div class="empty-icon">${icon('spark')}</div><h2>${ready?'尚未產生策略企劃':'尚未產生策略企劃'}</h2><p>確認需求後可複製 AI 指令；貼回會先預覽，套用後仍須人工檢查並標記完成。</p></div>`;
-  return controls+current+edit+(p.strategyPrev?`<details class="card"><summary>上一版（${esc(timeText(p.strategyPrev.at))}）</summary>${strategyDocument(p,p.strategyPrev)}</details>`:'');
+  return controls+current+edit+(p.strategyPrev?`<details class="card"><summary>上一版（${esc(timeText(p.strategyPrev.at))}）</summary>${strategyDocument(p,p.strategyPrev)}</details>`:'')+strategyCompareBody(p);
 }
 function placeholderBody(p,id){
   const fields=referenceFields(p.type,id);
@@ -602,24 +626,37 @@ let strategyPasteResult=null,strategyPasteText='';
 function showStrategyPrompt(){
   const p=findProject(view.id);if(stepStatus(p,'brief').s!=='done')return;
   const prompt=strategyPrompt(p);
-  showInfo('複製 AI 指令',`<div class="strategy-dialog-body"><p class="muted">請檢查遮罩後的全文。自由文字中的電話與信箱會盡力遮罩；複製前仍請自行確認。</p>${p.strategyPending?'<p class="strategy-warning">再次複製會取代待回覆快照；舊回答可能不對應。</p>':''}<label>指令全文預覽<textarea id="strategy-prompt-text" readonly rows="16">${esc(prompt)}</textarea></label><div class="dialog-footer strategy-footer"><button type="button" data-close>取消</button><button type="button" class="primary" data-action="strategy-copy-confirm">複製</button></div></div>`);
+  showInfo('複製 AI 指令',`<div class="strategy-dialog-body"><p class="muted">請檢查遮罩後的全文。自由文字中的電話與信箱會盡力遮罩；複製前仍請自行確認。</p>${strategyCopyWarn(p)?'<p class="strategy-warning">再次複製會取代這次指令的紀錄；舊回答可能不對應。</p>':''}<label>指令全文預覽<textarea id="strategy-prompt-text" readonly rows="16">${esc(prompt)}</textarea></label><div class="dialog-footer strategy-footer"><button type="button" data-close>取消</button><button type="button" class="primary" data-action="strategy-copy-confirm">複製</button></div></div>`);
 }
 function showStrategyPaste(){
   const p=findProject(view.id);if(stepStatus(p,'brief').s!=='done')return;
   strategyPasteResult=null;strategyPasteText='';
-  showInfo('貼上 AI 回覆',`<div class="strategy-dialog-body"><p class="muted">按 AI 回答中程式碼框右上角的『複製』；沒有程式碼框時，長按回答 → 複製。Claude 若把內容開在側邊文件，按文件上的 Copy。再於下方長按貼上。iOS 詢問時請允許貼上。本站只讀取此文字框，不會讀取剪貼簿。</p><label>AI 回覆<textarea id="strategy-paste-text" rows="10" maxlength="30000" placeholder="在這裡貼上完整 AI 回覆"></textarea></label><div id="strategy-parse-result" aria-live="polite"></div><div class="dialog-footer strategy-footer"><button type="button" data-close>取消</button><button type="button" data-action="strategy-parse">預覽五欄</button><button type="button" class="primary" data-action="strategy-apply" disabled>套用</button></div></div>`);
+  showInfo('貼上 AI 回覆',`<div class="strategy-dialog-body"><p class="muted">按 AI 回答中程式碼框右上角的『複製』；沒有程式碼框時，長按回答 → 複製。Claude 若把內容開在側邊文件，按文件上的 Copy。再於下方長按貼上。iOS 詢問時請允許貼上。本站只讀取此文字框，不會讀取剪貼簿。</p><label>AI 回覆<textarea id="strategy-paste-text" rows="10" maxlength="30000" placeholder="在這裡貼上完整 AI 回覆"></textarea></label><div id="strategy-parse-result" aria-live="polite"></div><div class="dialog-footer strategy-footer"><button type="button" data-close>取消</button><button type="button" data-action="strategy-parse">預覽五欄</button><button type="button" class="primary" data-action="strategy-apply" disabled>設成目前版</button><button type="button" data-action="strategy-compare" disabled>只留下比較</button></div></div>`);
 }
 function previewStrategyPaste(){
   const textarea=$('#strategy-paste-text');if(!textarea)return;
   strategyPasteText=textarea.value;strategyPasteResult=parseStrategy(strategyPasteText);
   const p=findProject(view.id),r=strategyPasteResult,notes=[...r.warnings];
-  if(!p.strategyPending)notes.unshift('沒有待回覆快照；套用時會使用目前需求。');
+  if(!p.strategyPending)notes.unshift('這台瀏覽器沒有這次『複製 AI 指令』的紀錄。套用後，五欄仍是你貼上的文字，並會被當成依現在的需求所寫。若這份回答來自較早的指令，請先按『複製 AI 指令』再貼，或套用後自己核對。');
   else{
-    if(!equal(p.strategyPending.snapshot,strategySnapshot(p)))notes.unshift('需求在複製指令後改過，請核對回答。');
-    if(p.strategyPending.replaced)notes.unshift('指令曾再次複製；舊回答可能不對應目前快照。');
+    if(!equal(p.strategyPending.snapshot,strategySnapshot(p)))notes.unshift('需求在複製指令後改過，請核對回答。仍可套用；套用後策略會是『需重新生成』，要重新複製指令才能標記完成。');
+    if(p.strategyPending.replaced)notes.unshift('指令曾再次複製；舊回答可能不對應這次指令。');
   }
-  $('#strategy-parse-result').innerHTML=`<div class="strategy-preview"><h3>五欄預覽</h3>${notes.length?`<div class="strategy-warnings" role="alert">${notes.map(w=>`<p>${esc(w)}</p>`).join('')}</div>`:''}${STRATEGY_KEYS.map(([key,label])=>`<section><h4>${esc(label)}（${r.sections[key].length} 字元）</h4><p class="pre-wrap">${esc(r.sections[key]||'未辨識')}</p></section>`).join('')}${r.unclassified?`<section><h4>無法歸類的原文</h4><p class="pre-wrap">${esc(r.unclassified)}</p></section>`:''}</div>`;
+  r.notes=notes;
+  $('#strategy-parse-result').innerHTML=`<div class="strategy-preview"><h3>五欄預覽</h3>${notes.length?`<div class="strategy-warnings" role="alert">${notes.map(w=>`<p>${esc(w)}</p>`).join('')}</div>`:''}${STRATEGY_KEYS.map(([key,label])=>`<section><h4>${esc(label)}（${r.sections[key].length} 字元）</h4><p class="pre-wrap">${esc(r.sections[key]||'未辨識')}</p></section>`).join('')}${r.unclassified?`<section><h4>無法歸類的原文</h4><p class="pre-wrap">${esc(r.unclassified)}</p></section>`:''}<p class="muted">設成目前版：這份會變成目前版，剛才那份改到『上一版』；你改過的文字只留在上一版，再換一次就不見。</p><p class="muted">只留下比較：存進比較清單，不會改動目前版。</p><fieldset class="strategy-source"><legend>只留下比較時，請選來源</legend>${['ChatGPT','Gemini','Claude','其他'].map(source=>`<label><input type="radio" name="strategy-source" value="${source}">${source}</label>`).join('')}</fieldset></div>`;
   $('#info-dialog [data-action="strategy-apply"]').disabled=!r.canApply;
+  $('#info-dialog [data-action="strategy-compare"]').disabled=!r.canApply;
+}
+function currentPaste(){
+  const p=findProject(view.id),textarea=$('#strategy-paste-text');
+  if(!p||!textarea||textarea.value!==strategyPasteText||!strategyPasteResult?.canApply){previewStrategyPaste();return null;}
+  return {p,parsed:strategyPasteResult,snapshot:structuredClone(p.strategyPending?.snapshot||strategySnapshot(p))};
+}
+function setCurrentStrategy(p,sections,snapshot){
+  if(strategySame(p.strategy,sections,snapshot))return false;
+  p.strategyPrev=p.strategy;
+  p.strategy={at:stamp(p.strategy?.at),source:'ai-paste',template:STRATEGY_TEMPLATE,snapshot:structuredClone(snapshot),sections:structuredClone(sections)};
+  return true;
 }
 const actions={
 add:()=>openCreate(),home:()=>{if(location.hash&&location.hash!=='#/')location.hash='#/';else{page=0;render();$('main').scrollTop=0;}},
@@ -637,18 +674,26 @@ leads:()=>{location.hash='#/leads';},
 'strategy-paste':showStrategyPaste,
 'strategy-copy-confirm':async()=>{
   const p=findProject(view.id),prompt=$('#strategy-prompt-text');if(!p||!prompt)return;
-  const next={at:stamp(p.strategyPending?.at),template:STRATEGY_TEMPLATE,snapshot:strategySnapshot(p),...(p.strategyPending?{replaced:true}:{})};
-  if(!commit(()=>p.strategyPending=next))return;
-  try{await navigator.clipboard.writeText(prompt.value);$('#info-dialog').close();renderDetail();toast('AI 指令已複製；待回覆快照已儲存');}
+  const next={at:stamp(p.strategyPending?.at),template:STRATEGY_TEMPLATE,snapshot:strategySnapshot(p),applied:0,compared:0,...(strategyCopyWarn(p)?{replaced:true}:{})};
+  if(!commit(()=>{p.strategyPending=next;for(const item of Array.isArray(p.strategyCompare)?p.strategyCompare:[])if(item&&typeof item==='object'&&!Array.isArray(item))item.oldInstruction=!equal(item.snapshot,next.snapshot);}))return;
+  try{await navigator.clipboard.writeText(prompt.value);$('#info-dialog').close();renderDetail();toast('AI 指令已複製；這次指令已記錄');}
   catch{prompt.focus();prompt.select();renderDetail();toast('無法自動複製，已選取全文，請手動複製。',{duration:9000});}
 },
 'strategy-parse':previewStrategyPaste,
 'strategy-apply':()=>{
-  const p=findProject(view.id),textarea=$('#strategy-paste-text');if(!p||!textarea||textarea.value!==strategyPasteText)return previewStrategyPaste();
-  const parsed=parseStrategy(textarea.value);if(!parsed.canApply)return previewStrategyPaste();
-  const snapshot=p.strategyPending?.snapshot||strategySnapshot(p);
-  if(!commit(()=>{p.strategyPrev=p.strategy;p.strategy={at:stamp(p.strategy?.at),source:'ai-paste',template:STRATEGY_TEMPLATE,snapshot:structuredClone(snapshot),sections:parsed.sections};delete p.strategyPending;}))return;
-  $('#info-dialog').close();renderDetail();render();toast('AI 草稿已套用，請檢查五欄後標記完成');
+  const data=currentPaste();if(!data)return;
+  const {p,parsed,snapshot}=data,same=strategySame(p.strategy,parsed.sections,snapshot);
+  if(!commit(()=>{setCurrentStrategy(p,parsed.sections,snapshot);if(p.strategyPending)p.strategyPending.applied=(Number(p.strategyPending.applied)||0)+1;}))return;
+  $('#info-dialog').close();renderDetail();render();toast(same?'跟目前版相同':'AI 草稿已設成目前版，請檢查五欄後標記完成');
+},
+'strategy-compare':()=>{
+  const data=currentPaste();if(!data)return;
+  const {p,parsed,snapshot}=data,source=$('#info-dialog [name="strategy-source"]:checked')?.value;
+  if(!source){toast('請先點選 AI 來源');return;}
+  if((Array.isArray(p.strategyCompare)?p.strategyCompare.length:0)>=3&&!window.confirm('比較清單已滿，會擠掉最舊的一份。要繼續嗎？'))return;
+  const item={at:stamp(Array.isArray(p.strategyCompare)?p.strategyCompare.at(-1)?.at:null),source,sections:structuredClone(parsed.sections),snapshot,warnings:[...parsed.warnings],instructionAt:p.strategyPending?.at||null,oldInstruction:false};
+  if(!commit(()=>{if(!Array.isArray(p.strategyCompare))p.strategyCompare=[];if(p.strategyCompare.length>=3)p.strategyCompare.shift();p.strategyCompare.push(item);if(p.strategyPending)p.strategyPending.compared=(Number(p.strategyPending.compared)||0)+1;}))return;
+  $('#info-dialog').close();renderDetail();render();toast('已留下比較');
 },
 'gen-strategy':()=>{
   const p=findProject(view.id);if(stepStatus(p,'brief').s!=='done')return;
@@ -692,13 +737,23 @@ if(b.hasAttribute('data-close'))return b.closest('dialog').close();
 if(b.hasAttribute('data-drawer-close'))return closeDrawer();
 if(b.dataset.jump){$(`#sec-${b.dataset.jump}`)?.scrollIntoView({block:'start',behavior:'smooth'});return;}
 if(b.dataset.action)return actions[b.dataset.action]?.();
+if(b.hasAttribute('data-strategy-use')){
+  const p=findProject(view.id),item=Array.isArray(p?.strategyCompare)?p.strategyCompare[Number(b.dataset.strategyUse)]:null;if(!item||typeof item!=='object'||Array.isArray(item))return;
+  const same=strategySame(p.strategy,item.sections,item.snapshot);
+  if(!commit(()=>{setCurrentStrategy(p,item.sections,item.snapshot);if(p.strategyPending)p.strategyPending.applied=(Number(p.strategyPending.applied)||0)+1;}))return;
+  renderDetail();render();toast(same?'跟目前版相同':'已改用這份當目前版；請檢查完成狀態');return;
+}
+if(b.hasAttribute('data-strategy-remove')){
+  const p=findProject(view.id),index=Number(b.dataset.strategyRemove);if(!Array.isArray(p?.strategyCompare)||!p.strategyCompare[index])return;
+  if(commit(()=>p.strategyCompare.splice(index,1))){renderDetail();render();toast('已刪除比較版');}return;
+}
 if(b.dataset.editField)return openDrawer(view.id,{field:b.dataset.editField});
 if(b.dataset.editSection)return openDrawer(view.id,{section:b.dataset.editSection});
 if(b.dataset.source){const p=findProject(view.id);if(commit(()=>p.source.kind=b.dataset.source)){renderDetail();render();}return;}
 if(b.dataset.skip){const p=findProject(view.id);if(commit(()=>{if(p.skip[b.dataset.skip])delete p.skip[b.dataset.skip];else p.skip[b.dataset.skip]=true;})){renderDetail();render();}return;}
 if(b.hasAttribute('data-est-delete'))return changeEstimate(e=>e.rows=e.rows.filter(r=>r.id!==b.closest('[data-est-id]').dataset.estId));
 if(b.hasAttribute('data-est-link'))return changeEstimate(e=>e.rows.find(r=>r.id===b.closest('[data-est-id]').dataset.estId).areaLink='on');
-if(b.dataset.copy){const p=findProject(b.dataset.copy);if(commit(()=>projects.unshift({...structuredClone(p),id:crypto.randomUUID(),name:p.name+'（副本）',steps:{},strategy:undefined,strategyPrev:undefined,strategyPending:undefined,source:{kind:'manual'}}))){page=0;render();toast('已複製專案');}}
+if(b.dataset.copy){const p=findProject(b.dataset.copy);if(commit(()=>projects.unshift({...structuredClone(p),id:crypto.randomUUID(),name:p.name+'（副本）',steps:{},strategy:undefined,strategyPrev:undefined,strategyPending:undefined,strategyCompare:[],source:{kind:'manual'}}))){page=0;render();toast('已複製專案');}}
 if(b.dataset.delete)confirmDelete([b.dataset.delete]);
 if(b.dataset.page!==undefined){page=Number(b.dataset.page);render();$('main').scrollTop=0;}
 });
@@ -720,6 +775,10 @@ $('#auth-shell').addEventListener('submit',async e=>{
     const message=$('#leads-error');if(message)message.textContent=error;
   }
 });
+$('#detail-view').addEventListener('toggle',e=>{
+  if(!e.target.matches('.strategy-compare-item')||!e.target.open)return;
+  e.target.closest('.strategy-compare-list').querySelectorAll('.strategy-compare-item').forEach(item=>{if(item!==e.target)item.open=false;});
+},true);
 $('#detail-view').addEventListener('input',e=>{if(e.target.matches('[data-est-field],[data-est-condition]'))estimateEdit(e.target,false);});
 $('#detail-view').addEventListener('change',e=>{if(e.target.matches('[data-est-field],[data-est-condition]'))estimateEdit(e.target,true);});
 $('#rows').addEventListener('change',e=>{const id=e.target.dataset.select;if(id){e.target.checked?selected.add(id):selected.delete(id);render();}});
@@ -728,7 +787,7 @@ for(const checkbox of [$('#select-all'),$('#card-select-all')])checkbox.addEvent
 $('#project-cards').addEventListener('click',e=>{if(e.target.closest('a,button,label,input'))return;const card=e.target.closest('[data-open]');if(card)location.hash=projectHref(findProject(card.dataset.open),'brief');});
 $('#project-cards').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-open]')){e.preventDefault();location.hash=projectHref(findProject(e.target.dataset.open),'brief');}});
 // 快速新增
-$('#project-form').addEventListener('submit',e=>{e.preventDefault();const form=e.target;if(!form.elements.name.value.trim()){form.elements.name.setCustomValidity('請輸入專案名稱');form.elements.name.reportValidity();return;}const data=Object.fromEntries(new FormData(form));for(const f of ['name','contact','email','phone'])data[f]=data[f].trim();Object.assign(data,{done:false,notes:'',brief:{},steps:{},skip:{},source:{kind:'manual'},id:crypto.randomUUID()});if(!commit(()=>projects.unshift(data)))return;page=0;$('#editor').close();location.hash=`#/p/${encodeURIComponent(data.id)}/brief`;toast('專案已建立，接著補齊需求資料',{actionLabel:'開始填寫',onAction:()=>openDrawer(data.id,{section:sectionsFor(data.type)[1].id})});});
+$('#project-form').addEventListener('submit',e=>{e.preventDefault();const form=e.target;if(!form.elements.name.value.trim()){form.elements.name.setCustomValidity('請輸入專案名稱');form.elements.name.reportValidity();return;}const data=Object.fromEntries(new FormData(form));for(const f of ['name','contact','email','phone'])data[f]=data[f].trim();Object.assign(data,{done:false,notes:'',brief:{},steps:{},skip:{},strategyCompare:[],source:{kind:'manual'},id:crypto.randomUUID()});if(!commit(()=>projects.unshift(data)))return;page=0;$('#editor').close();location.hash=`#/p/${encodeURIComponent(data.id)}/brief`;toast('專案已建立，接著補齊需求資料',{actionLabel:'開始填寫',onAction:()=>openDrawer(data.id,{section:sectionsFor(data.type)[1].id})});});
 $('#project-form').elements.name.addEventListener('input',e=>e.target.setCustomValidity(''));
 // 側邊表單
 $('#drawer-form').addEventListener('input',e=>{if(e.target.name==='name')e.target.setCustomValidity('');dirty=true;updateDrawerProgress();});

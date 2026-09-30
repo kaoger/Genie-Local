@@ -230,6 +230,17 @@ summary{cursor:pointer;font-weight:600;color:#343b43;overflow-wrap:anywhere}.car
 .strategy-dialog-body>p{margin:0}
 .strategy-dialog-body textarea{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}
 .strategy-preview{padding-bottom:8px}
+.strategy-source{display:flex;flex-wrap:wrap;gap:8px;border:1px solid #d6dbe0;border-radius:6px;min-width:0;margin:12px 0 0;padding:10px}
+.strategy-source legend{padding:0 5px}
+.strategy-source label{display:flex;flex-direction:row;align-items:center;gap:6px;min-height:44px;padding:8px 10px;border:1px solid #d6dbe0;border-radius:5px;cursor:pointer}
+.strategy-source input[type=radio]{width:18px;min-width:18px;height:18px;margin:0}
+.strategy-compare,.strategy-compare-item,.strategy-compare-content{min-width:0;overflow-wrap:anywhere}
+.strategy-compare-list{display:grid;gap:8px}
+.strategy-compare-item{border:1px solid #d6dbe0;border-radius:6px}
+.strategy-compare-item summary{min-height:44px;padding:11px 12px;line-height:22px}
+.strategy-compare-content{padding:0 12px 14px}
+.strategy-compare-tag{display:inline-block;margin-left:6px;padding:0 6px;border-radius:4px;background:#fffbeb;color:#805600;font-size:12px}
+.strategy-compare-content .strategy-actions button{min-height:44px}
 .strategy-footer{position:sticky;bottom:0;background:#fff;padding:12px 0;margin-top:0;border-top:1px solid #e5e7eb;z-index:1}
 .strategy-footer button{min-height:44px}
 #info-dialog:has(.strategy-dialog-body) .dialog-heading button{min-width:44px;min-height:44px;display:grid;place-items:center}
@@ -240,8 +251,9 @@ summary{cursor:pointer;font-weight:600;color:#343b43;overflow-wrap:anywhere}.car
   .strategy-dialog-body{min-height:100%}
   .strategy-dialog-body>label{min-width:0}
   .strategy-dialog-body textarea{width:100%;min-height:180px}
-  .strategy-footer{margin-top:auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .strategy-footer{margin-top:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
   .strategy-footer button{padding:8px 4px;white-space:normal}
+  .strategy-source label{flex:1 1 calc(50% - 8px)}
 }
 @media(max-width:900px){.status-actions{max-width:260px}}
 @media(max-width:600px){.status-bar{flex-direction:column;align-items:stretch;padding:16px}.status-actions{max-width:none;justify-content:flex-start}.status-actions button{flex:1}.card{padding:16px}.reference-values{grid-template-columns:1fr}.segmented{width:100%}.segmented button{flex:1;padding:8px;font-size:12px}.totals{width:100%}.totals>div{gap:12px}.detail-top{gap:8px}.crumbs{flex:1}.detail-actions{max-width:60%}.detail-actions .primary{white-space:normal}.doc-table th{width:34%}.status-main .chip-row{margin-bottom:6px}.stepper li{flex-shrink:0}#toast{flex-wrap:wrap;gap:8px}#toast-text{flex:1 1 100%}}

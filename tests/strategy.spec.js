@@ -320,7 +320,7 @@ test('複製、重載、貼回、編輯與完成依據傳遞至視覺及提案',
   await page.locator('[data-action="strategy-prompt"]').click();
   await page.locator('[data-action="strategy-copy-confirm"]').click();
   await page.reload();
-  await expect(page.locator('.strategy-workflow')).toContainText('待回覆指令');
+  await expect(page.locator('.strategy-workflow')).toContainText('這次指令');
   await preview(page, standard);
   expect((await storedProjects(page))[0].strategy).toBeUndefined();
   await page.locator('[data-action="strategy-apply"]').click();
