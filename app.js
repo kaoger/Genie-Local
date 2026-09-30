@@ -384,7 +384,8 @@ function placeholderBody(p,id){
 }
 
 /* ================= 業務估價（草稿、解析與即時合計） ================= */
-const number=v=>Number.isFinite(Number(v))?Number(v):0;
+// 載入時整理既有專案的格局資料會先呼叫此函式。
+function number(v){return Number.isFinite(Number(v))?Number(v):0;}
 const money=v=>number(v).toLocaleString('zh-TW',{minimumFractionDigits:0,maximumFractionDigits:2});
 function defaultEstimate(p){return {rows:isSpace(p.type)?[{id:'design',item:'室內設計費',qty:'',unit:'坪',price:'',areaLink:'on'},{id:'drawing',item:'3D 圖與施工圖',qty:1,unit:'式',price:''},{id:'supervision',item:'工程監造',qty:1,unit:'式',price:''}]:[{id:'design',item:'設計提案',qty:1,unit:'式',price:''},{id:'final',item:'修改與完稿',qty:1,unit:'式',price:''}],tax:'excl',scope:'',validUntil:''};}
 function resolvedEstimate(p,estimate=p.estimate||defaultEstimate(p)){return {rows:(estimate.rows||[]).map(r=>({id:r.id,item:String(r.item||'').trim(),qty:r.areaLink==='on'?number(p.brief.area):number(r.qty),unit:String(r.unit||'').trim(),price:number(r.price),...(r.areaLink?{areaLink:r.areaLink}:{})})),tax:estimate.tax==='incl'?'incl':'excl',scope:String(estimate.scope||'').trim(),validUntil:estimate.validUntil||''};}
