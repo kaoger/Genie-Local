@@ -3,6 +3,8 @@
 # 本機工具設定
 .claude/
 .codex/
+# Gemini 轉換用的原始檔與 Markdown（可能含客戶資料，不可提交）
+.inbox/
 # 系統檔
 Thumbs.db
 desktop.ini

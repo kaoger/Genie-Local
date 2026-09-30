@@ -8,6 +8,7 @@
 - **Claude（總指揮）**：方向、規格、分派、裁決、驗收複查、git 提交。
 - **Codex（實作）**：依 `docs/` 裡的規格撰寫程式碼，完成後回報修改內容、偏離規格處與沒把握的驗收項目。
 - **Grok（反方＋資料蒐集）**：唯讀。網路資料蒐集、對規格與程式碼持反方意見；不修改任何檔案，意見交給 Claude 裁決。
+- **Gemini（轉換員，Antigravity CLI `agy`）**：唯讀。把 `.inbox/raw/` 的文字、PDF、會議錄音轉成 Markdown，由 Claude 存到 `.inbox/md/` 供各方閱讀；規則見 `GEMINI.md`。`.inbox/` 可能含客戶資料，已列入 `.gitignore`，不可提交。
 - **使用者**：決策與授權。
 
 ## Codex 實作規則
