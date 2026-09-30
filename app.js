@@ -179,14 +179,17 @@ const SAMPLE_BRIEFS={
   'sample-3':{region:'台中市',houseType:'老屋翻新',area:'28',style:['北歐'],renoType:'局部翻修'}};
 const seed=[['居家設計','2026-07-25',true],['居家設計','2026-07-22',true],['測試','2026-07-21',false],['示範居家設計','2026-07-20',true],['示範居家設計','2026-07-15',true],['居家設計','2026-07-15',true],['設計專案','2026-07-15',false],['居家設計','2026-07-15',false]].map(([name,date,done],i)=>({id:'sample-'+i,name,date,done,contact:i===0?'示範客戶':i===6?'示範聯絡人 A':i===7?'示範聯絡人 B':'',type:i===6?'其他設計':'居家裝潢設計',email:i>=6?'hello@example.com':'',phone:i===6?'0900000000':'',due:'',notes:''}));
 let projects=seed.map(p=>({...p,brief:structuredClone(SAMPLE_BRIEFS[p.id]||{}),source:p.done?{kind:'client',submittedAt:p.date+'T08:00:00.000Z'}:{kind:'manual'}})),page=0,deleting=null,undoState=null,toastTimer,toastAction=null;
-let storageWarning=false;
-try{const value=JSON.parse(localStorage.getItem(key));if(Array.isArray(value)&&value.every(p=>p&&typeof p.id==='string'&&typeof p.name==='string'&&typeof p.date==='string'))projects=value;}catch{storageWarning=true;}
+let storageWarning=false,normalizationFailed=false;
+try{const value=JSON.parse(localStorage.getItem(key));if(Array.isArray(value))projects=value;else if(value!==null)storageWarning=true;}catch{storageWarning=true;}
 function normalizeProject(p){
+  if(!p||typeof p!=='object'||Array.isArray(p)||typeof p.id!=='string'||typeof p.name!=='string'||typeof p.date!=='string')throw Error('專案基本欄位無效');
   if(!p.brief||typeof p.brief!=='object'||Array.isArray(p.brief))p.brief={};
   if(!p.type)p.type='居家裝潢設計';
   if(!p.steps||typeof p.steps!=='object'||Array.isArray(p.steps))p.steps={};
   if(!p.skip||typeof p.skip!=='object'||Array.isArray(p.skip))p.skip={};
   if(!p.source||!['manual','meeting','client','unknown'].includes(p.source.kind))p.source={kind:'unknown'};
+  if(typeof p.leadId!=='string'||!p.leadId.trim())delete p.leadId;
+  if(!p.leadDigest||typeof p.leadDigest!=='object'||Array.isArray(p.leadDigest))delete p.leadDigest;
   for(const name of ['strategy','strategyPrev'])if(p[name]?.snapshot){
     const snap=p[name].snapshot;p[name].snapshot=strategySnapshot({type:snap.type||p.type,brief:snap.brief||{}});
   }
@@ -203,6 +206,7 @@ function normalizeProject(p){
   }));
   function migrateBasis(id,basis){
     if(!basis)return basis;
+    if(typeof basis!=='object'||Array.isArray(basis))throw Error('完成依據格式無效');
     if(id==='strategy'&&basis.req&&!basis.req.brief)basis.req=strategySnapshot({type:basis.req.type||p.type,brief:basis.req});
     if(['strategy','visual','model3d'].includes(id)&&!Object.hasOwn(basis,'sections'))basis.sections=p.strategy?.sections??null;
     if(id==='proposal'&&Array.isArray(basis.parts))basis.parts=basis.parts.map(([step,part])=>[step,migrateBasis(step,part)]);
@@ -212,10 +216,56 @@ function normalizeProject(p){
   delete p.strategyStale;
   return p;
 }
-projects.forEach(normalizeProject);
-function save(){try{localStorage.setItem(key,JSON.stringify(projects));return true;}catch{toast('瀏覽器無法儲存，請使用左側「匯出本機資料」備份。',{duration:12000});return false;}}
-function commit(change){const backup=structuredClone(projects);try{change();if(save())return true;}catch{toast('變更未儲存，請重試。');}projects=backup;return false;}
-const findProject=id=>projects.find(p=>p.id===id);
+projects=projects.map((original,index)=>{try{return normalizeProject(structuredClone(original));}catch(error){normalizationFailed=true;console.warn(`第 ${index+1} 筆專案無法正規化`,error);return original;}});
+function save(){if(normalizationFailed||storageWarning){toast('部分資料無法讀取，請先匯出本機資料。',{duration:12000});return false;}try{localStorage.setItem(key,JSON.stringify(projects));return true;}catch{toast('瀏覽器無法儲存，請使用左側「匯出本機資料」備份。',{duration:12000});return false;}}
+function commit(change){if(normalizationFailed||storageWarning)return save();const backup=structuredClone(projects);try{change();if(save())return true;}catch{toast('變更未儲存，請重試。');}projects=backup;return false;}
+const findProject=id=>projects.find(p=>p&&typeof p==='object'&&p.id===id);
+
+/* ================= 名單帶入（純欄位對應） ================= */
+const LEAD_KEYS=['service','area','size','timeline','budget','name','phone','contact_time'];
+const LEAD_LABELS={service:'服務',area:'地區',size:'坪數',timeline:'預計開始',budget:'預算',name:'姓名',phone:'電話',contact_time:'方便聯絡'};
+const answerText=value=>typeof value==='string'?value.trim():'';
+function leadDigest(answers){
+  const digest=Object.fromEntries(LEAD_KEYS.map(key=>[key,answerText(answers[key])]));
+  digest.area=answers.area==='其他地區'?answerText(answers.area_other):digest.area;
+  return digest;
+}
+function taipeiDate(value){
+  const date=new Date(value);
+  if(!value||!Number.isFinite(date.getTime()))return '';
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date).map(x=>[x.type,x.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+function mapLeadToProject(lead){
+  if(!lead||typeof lead!=='object'||typeof lead.id!=='string'||!lead.id||!lead.answers||typeof lead.answers!=='object'||Array.isArray(lead.answers))return {error:'名單資料不完整，無法建立專案'};
+  const a=lead.answers,digest=leadDigest(a),service=digest.service,area=digest.area;
+  const type=service==='商業空間'?'商業空間設計':['新成屋裝潢','舊屋翻新','局部裝修'].includes(service)?'居家裝潢設計':'其他設計';
+  const brief={},needs=[],notes=['由客戶名單建立'];
+  if(service==='新成屋裝潢')brief.houseType='新成屋';
+  if(service==='舊屋翻新')brief.houseType='老屋翻新';
+  if(service==='局部裝修')brief.renoType='局部翻修';
+  if(type==='其他設計')needs.push(`服務（客人勾選）：${service||'未填'}`);
+  const alias={高雄市:'高雄市',台南:'台南市',台中:'台中市',彰化:'彰化縣',雲林:'雲林縣'};
+  const selectedArea=answerText(a.area);
+  const region=area==='嘉義'?'':Object.hasOwn(alias,selectedArea)?alias[selectedArea]:COUNTIES.includes(area)?area:'';
+  if(region)brief.region=region;
+  else if(area)notes.push(`地區（客人填寫）：${area}`);
+  if(digest.size)needs.push(`坪數（客人勾選）：${digest.size}`);
+  if(digest.timeline)needs.push(`預計開始（客人勾選）：${digest.timeline}`);
+  const budgetOptions=type==='其他設計'?[]:allFields(type).find(f=>f.key==='budget')?.options||[];
+  if(digest.budget){if(budgetOptions.includes(digest.budget))brief.budget=digest.budget;else needs.push(`預算（客人勾選）：${digest.budget}`);}
+  if(digest.contact_time)notes.push(`方便聯絡（客人勾選）：${digest.contact_time}`);
+  if(lead.contact_result)notes.push(`建立時聯絡結果：${({contacted:'已聯絡',site_visit:'約丈量',not_interested:'沒興趣',unreachable:'聯絡不上'})[lead.contact_result]||answerText(lead.contact_result)}`);
+  if(needs.length)brief.needsNote=needs.join('\n');
+  const date=taipeiDate(lead.completed_at),source={kind:'client'};
+  if(date)source.submittedAt=lead.completed_at;
+  const contact=digest.name||'未留姓名';
+  const name=[contact,area,service].filter(Boolean).join(' ').slice(0,80);
+  return {name,date,done:false,contact,phone:digest.phone,email:'',due:'',type,notes:notes.join('\n'),brief,steps:{},skip:{},strategyCompare:[],source,leadId:lead.id,leadDigest:digest};
+}
+function projectsForLead(id){return projects.filter(p=>p&&typeof p==='object'&&p.leadId===String(id)).sort((a,b)=>(Date.parse(b.createdAt)||0)-(Date.parse(a.createdAt)||0));}
+function openLeadProject(id){const matches=projectsForLead(id);if(!matches.length)return false;location.hash=`#/p/${encodeURIComponent(matches[0].id)}/brief`;if(matches.length>1)toast(`這位客人有${matches.length===2?'兩':matches.length}筆專案，開啟最近的`);return true;}
+window.GenieProjects={projectsForLead,openLeadProject,createFromLead(lead){const project=mapLeadToProject(lead);if(project.error)return project;project.id=crypto.randomUUID();project.createdAt=new Date().toISOString();if(!commit(()=>projects.unshift(project)))return {error:'專案未儲存，請稍後再試'};page=0;location.hash=`#/p/${encodeURIComponent(project.id)}/brief`;toast('已建立專案（名單的聯絡結果沒有改變）');return {project};}};
 
 /* ================= 通知 ================= */
 function toast(message,{actionLabel='',onAction=null,duration=5000}={}){clearTimeout(toastTimer);$('#toast-text').innerHTML=esc(message);toastAction=onAction;$('#toast-action').innerHTML=esc(actionLabel);$('#toast-action').hidden=!actionLabel;$('#toast').hidden=false;toastTimer=setTimeout(()=>$('#toast').hidden=true,duration);}
@@ -227,7 +277,7 @@ function isEmpty(v){if(v==null||v==='')return true;if(Array.isArray(v))return !v
 function norm(v){if(isEmpty(v))return '';if(Array.isArray(v)){const values=v.map(norm).filter(v=>v!=='').sort();return values.length?values:'';}if(typeof v==='object'){const values=Object.fromEntries(Object.entries(v).map(([k,v])=>[k,norm(v)]));return isEmpty(values)?'':values;}return typeof v==='string'?v.trim():v;}
 function stable(v){return JSON.stringify(v,(_,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.keys(x).sort().map(k=>[k,x[k]])):x);}
 const equal=(a,b)=>stable(a)===stable(b);
-function fieldNorm(f,v){v=norm(v);if(f.type==='number'&&!isEmpty(v))return Number.isFinite(Number(v))?Number(v):v;if(f.type==='layout'&&v&&typeof v==='object')return norm(Object.fromEntries(['r','l','b'].map(k=>[k,isEmpty(v[k])?'':number(v[k])])));return v;}
+function fieldNorm(f,v){v=norm(v);if(!f)return v;if(f.type==='number'&&!isEmpty(v))return Number.isFinite(Number(v))?Number(v):v;if(f.type==='layout'&&v&&typeof v==='object')return norm(Object.fromEntries(['r','l','b'].map(k=>[k,isEmpty(v[k])?'':number(v[k])])));return v;}
 const reqOf=(type,brief)=>({type,...Object.fromEntries(allFields(type).filter(f=>f.req).map(f=>[f.key,fieldNorm(f,brief?.[f.key])]))});
 const estDeps=p=>({type:p.type,...Object.fromEntries(allFields(p.type).filter(f=>f.est).map(f=>[f.key,fieldNorm(f,getVal(p,f))]))});
 const modelSupported=p=>!['品牌設計','包裝設計','網站設計'].includes(p.type);
@@ -316,22 +366,29 @@ const aiBadge=f=>f.ai?'<span class="ai-badge" title="確認需求與生成策略
 const stateLabel={missing:'缺資料',ready:'可開始',done:'已完成',stale:'需更新',na:'不適用'};
 const badge=(p,id)=>{const st=stepStatus(p,id);return `<span class="state-tag is-${st.s}">${stateLabel[st.s]}</span>`;};
 const projectHref=(p,id)=>`#/p/${esc(encodeURIComponent(p.id))}/${id}`;
-const sourceLabel=p=>({manual:'手動建立',meeting:'會議記錄',client:p.source.submittedAt?'客戶已送出':'等待客戶填寫',unknown:'未註明'}[p.source.kind]);
+const sourceLabel=p=>p.leadId?'客戶名單':({manual:'手動建立',meeting:'會議記錄',client:p.source.submittedAt?'客戶已送出':'等待客戶填寫',unknown:'未註明'}[p.source.kind]);
 function nextStep(p){return STEPS.find(s=>!['done','na'].includes(stepStatus(p,s.id).s));}
 function currentStep(p){const s=nextStep(p);if(!s)return '<span class="state-tag is-done">提案已完成</span>';const st=stepStatus(p,s.id);return `<a class="state-tag is-${st.s}" href="${projectHref(p,s.id)}">${['①','②','③','④','⑤','⑥'][STEPS.indexOf(s)]} ${s.label}・${stateLabel[st.s]}</a>`;}
 
 /* ================= 清單頁 ================= */
-function current(){return projects.slice(page*pageSize,(page+1)*pageSize);}
+const renderFailures=new Set();
+function markUnreadableProject(index,error){normalizationFailed=true;$('#storage-warning').hidden=false;if(!renderFailures.has(index)){console.warn(`第 ${index+1} 筆專案無法顯示`,error);renderFailures.add(index);}}
+function renderableProjects(){return projects.filter((p,index)=>{try{if(!p||typeof p.id!=='string'||typeof p.name!=='string'||typeof p.date!=='string')throw Error('專案基本欄位無效');sourceLabel(p);currentStep(p);return true;}catch(error){markUnreadableProject(index,error);return false;}});}
+function current(){return renderableProjects().slice(page*pageSize,(page+1)*pageSize);}
 function render(){
-page=Math.max(0,Math.min(page,Math.ceil(projects.length/pageSize)-1));
+const visible=renderableProjects();page=Math.max(0,Math.min(page,Math.ceil(visible.length/pageSize)-1));
 const rows=current();
-$('#rows').innerHTML=rows.map(p=>`<tr data-id="${esc(p.id)}" class="${selected.has(p.id)?'selected':''}"><td><input type="checkbox" data-select="${esc(p.id)}" aria-label="選取專案 ${esc(p.name)}" ${selected.has(p.id)?'checked':''}></td><td><a class="project-name" href="${projectHref(p,'brief')}" title="開啟專案">${esc(p.name)}</a>${p.id.startsWith('sample-')?'<span class="example-badge seed-badge">示範</span>':''}</td><td>${esc(p.contact)}</td><td>${esc(dateText(p.date))}</td><td><span class="type-tag">${esc(p.type)}</span></td><td>${esc(p.email)}</td><td>${esc(p.phone)}</td><td>${esc(dateText(p.due))}</td><td>${esc(sourceLabel(p))}</td><td>${currentStep(p)}</td><td><div class="row-actions"><button data-copy="${esc(p.id)}" aria-label="複製 ${esc(p.name)}" title="複製專案">${icon('copy')}</button><button data-delete="${esc(p.id)}" aria-label="刪除 ${esc(p.name)}" title="刪除專案">${icon('trash')}</button></div></td></tr>`).join('')+`<tr class="example-row"><td></td><td><span class="example-badge">範例</span><span class="example-name">示範品牌 / Demo Brand</span></td><td>示範聯絡人</td><td>2024/11/27</td><td><span class="type-tag">品牌設計</span></td><td>info@example.com</td><td></td><td>2025/01/31</td><td>—</td><td>—</td><td></td></tr>`;
-$('#project-cards').innerHTML=rows.map(p=>`<article class="project-card ${selected.has(p.id)?'selected':''}" data-id="${esc(p.id)}" data-open="${esc(p.id)}" tabindex="0" role="link" aria-label="開啟專案 ${esc(p.name)}"><div class="project-card-head"><h2>${esc(p.name)}${p.id.startsWith('sample-')?'<span class="example-badge seed-badge">示範</span>':''}</h2><label class="project-card-select" aria-label="選取專案 ${esc(p.name)}"><input type="checkbox" data-select="${esc(p.id)}" aria-label="選取專案 ${esc(p.name)}" ${selected.has(p.id)?'checked':''}></label></div><dl><div><dt>聯絡人</dt><dd>${esc(p.contact||'—')}</dd></div><div><dt>洽詢日期</dt><dd>${esc(dateText(p.date))}</dd></div><div><dt>需求來源</dt><dd>${esc(sourceLabel(p))}</dd></div><div><dt>目前步驟</dt><dd>${currentStep(p)}</dd></div></dl><div class="project-card-actions"><a class="btn" href="${projectHref(p,'brief')}">開啟</a><button data-copy="${esc(p.id)}" aria-label="複製 ${esc(p.name)}">${icon('copy')}</button><button data-delete="${esc(p.id)}" aria-label="刪除 ${esc(p.name)}">${icon('trash')}</button></div></article>`).join('');
-const all=$('#select-all');all.checked=rows.length>0&&rows.every(p=>selected.has(p.id));all.indeterminate=rows.some(p=>selected.has(p.id))&&!all.checked;all.disabled=!rows.length;
+const tableProject=p=>`<tr data-id="${esc(p.id)}" class="${selected.has(p.id)?'selected':''}"><td><input type="checkbox" data-select="${esc(p.id)}" aria-label="選取專案 ${esc(p.name)}" ${selected.has(p.id)?'checked':''}></td><td><a class="project-name" href="${projectHref(p,'brief')}" title="開啟專案">${esc(p.name)}</a>${p.id.startsWith('sample-')?'<span class="example-badge seed-badge">示範</span>':''}</td><td>${esc(p.contact)}</td><td>${esc(dateText(p.date))}</td><td><span class="type-tag">${esc(p.type)}</span></td><td>${esc(p.email)}</td><td>${esc(p.phone)}</td><td>${esc(dateText(p.due))}</td><td>${esc(sourceLabel(p))}</td><td>${currentStep(p)}</td><td><div class="row-actions"><button data-copy="${esc(p.id)}" aria-label="複製 ${esc(p.name)}" title="複製專案">${icon('copy')}</button><button data-delete="${esc(p.id)}" aria-label="刪除 ${esc(p.name)}" title="刪除專案">${icon('trash')}</button></div></td></tr>`;
+const cardProject=p=>`<article class="project-card ${selected.has(p.id)?'selected':''}" data-id="${esc(p.id)}" data-open="${esc(p.id)}" tabindex="0" role="link" aria-label="開啟專案 ${esc(p.name)}"><div class="project-card-head"><h2>${esc(p.name)}${p.id.startsWith('sample-')?'<span class="example-badge seed-badge">示範</span>':''}</h2><label class="project-card-select" aria-label="選取專案 ${esc(p.name)}"><input type="checkbox" data-select="${esc(p.id)}" aria-label="選取專案 ${esc(p.name)}" ${selected.has(p.id)?'checked':''}></label></div><dl><div><dt>聯絡人</dt><dd>${esc(p.contact||'—')}</dd></div><div><dt>洽詢日期</dt><dd>${esc(dateText(p.date))}</dd></div><div><dt>需求來源</dt><dd>${esc(sourceLabel(p))}</dd></div><div><dt>目前步驟</dt><dd>${currentStep(p)}</dd></div></dl><div class="project-card-actions"><a class="btn" href="${projectHref(p,'brief')}">開啟</a><button data-copy="${esc(p.id)}" aria-label="複製 ${esc(p.name)}">${icon('copy')}</button><button data-delete="${esc(p.id)}" aria-label="刪除 ${esc(p.name)}">${icon('trash')}</button></div></article>`;
+const rendered=rows.flatMap((p,index)=>{try{return [{project:p,table:tableProject(p),card:cardProject(p)}];}catch(error){markUnreadableProject(index,error);return [];}});
+const shown=rendered.map(x=>x.project);
+$('#rows').innerHTML=rendered.map(x=>x.table).join('')+`<tr class="example-row"><td></td><td><span class="example-badge">範例</span><span class="example-name">示範品牌 / Demo Brand</span></td><td>示範聯絡人</td><td>2024/11/27</td><td><span class="type-tag">品牌設計</span></td><td>info@example.com</td><td></td><td>2025/01/31</td><td>—</td><td>—</td><td></td></tr>`;
+$('#project-cards').innerHTML=rendered.map(x=>x.card).join('');
+const all=$('#select-all');all.checked=shown.length>0&&shown.every(p=>selected.has(p.id));all.indeterminate=shown.some(p=>selected.has(p.id))&&!all.checked;all.disabled=!shown.length;
 const cardAll=$('#card-select-all');cardAll.checked=all.checked;cardAll.indeterminate=all.indeterminate;cardAll.disabled=all.disabled;
 $('.selection-bar').hidden=!selected.size;$('#selected-count').textContent=`已選取 ${selected.size} 個專案`;
-const total=Math.max(1,Math.ceil(projects.length/pageSize));$('#prev').disabled=page===0;$('#next').disabled=page>=total-1;
-$('#pages').dataset.total=total;$('#pages').innerHTML=Array.from({length:total},(_,i)=>`<button data-page="${i}" class="${i===page?'current':''}" aria-label="第 ${i+1} 頁" ${i===page?'aria-current="page"':''}>${i+1}</button>`).join('');$('#count').textContent=`${rows.length} / ${projects.length}`;
+const total=Math.max(1,Math.ceil(visible.length/pageSize));$('#prev').disabled=page===0;$('#next').disabled=page>=total-1;
+$('#pages').dataset.total=total;$('#pages').innerHTML=Array.from({length:total},(_,i)=>`<button data-page="${i}" class="${i===page?'current':''}" aria-label="第 ${i+1} 頁" ${i===page?'aria-current="page"':''}>${i+1}</button>`).join('');$('#count').textContent=`${shown.length} / ${visible.length}`;
 }
 function today(){const t=new Date();return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;}
 function openCreate(){const form=$('#project-form');form.reset();form.elements.type.innerHTML=TYPES.map(t=>`<option>${esc(t)}</option>`).join('');form.elements.date.value=today();form.elements.type.value='居家裝潢設計';$('#editor').showModal();}
@@ -342,6 +399,7 @@ function stepsHtml(p){return STEPS.map((s,i)=>{const st=stepStatus(p,s.id),mark=
 function renderDetail(){
   const p=findProject(view.id);if(!p)return;
   $('#detail-view').innerHTML=`<header class="detail-header"><div class="detail-top"><nav class="crumbs" aria-label="路徑"><a href="#/">潛在客戶</a><span aria-hidden="true">›</span><h1 title="${esc(p.name)}">${esc(p.name)}</h1></nav><div class="detail-actions"><span class="type-tag">${esc(p.type)}</span><button class="primary btn-icon" data-action="edit-all">${icon('edit')}編輯全部資料</button></div></div><nav class="stepper" aria-label="專案步驟"><ol>${stepsHtml(p)}</ol></nav></header><div class="detail-body"><div id="status-slot" aria-live="polite">${statusHtml(p,view.step)}</div>${stepBody(p)}</div>`;
+  if(view.step==='brief'&&p.leadId)checkLeadUpdate(p.id);
 }
 function refreshStatus(){const p=findProject(view.id);if(!p)return;$('#status-slot').innerHTML=statusHtml(p,view.step);$('.stepper ol').innerHTML=stepsHtml(p);render();}
 function missingList(r){return r.missing.map(f=>`<button class="link-chip" data-edit-field="${f.key}">${esc(f.label)}</button>`).join('');}
@@ -365,15 +423,40 @@ function statusHtml(p,id){
 function stepBody(p){if(view.step==='brief')return briefBody(p);if(view.step==='strategy')return strategyBody(p);if(view.step==='estimate')return estimateBody(p);if(view.step==='proposal')return proposalBody(p);return placeholderBody(p,view.step);}
 function briefBody(p){
   const cards=sectionsFor(p.type).map(s=>`<section class="card"><div class="card-head"><h2>${s.title}</h2><button class="btn-icon" data-edit-section="${s.id}">${icon('edit')}編輯</button></div><div class="kv">${s.fields.map(f=>{const v=display(f,getVal(p,f));return `<button class="kv-item${f.wide?' wide':''}" data-edit-field="${f.key}" title="點一下編輯"><span class="kv-label">${esc(f.label)}${aiBadge(f)}</span><span class="kv-value${v?'':' is-empty'}">${v?esc(v):'未填'}</span></button>`;}).join('')}</div></section>`).join('');
-  return `${sourceBody(p)}<p class="hint">小提示：點任何欄位，就會打開完整表單並跳到那一格。填好後請按「確認需求」。</p>${cards}`;
+  return `${sourceBody(p)}${p.leadId?'<p class="hint">客人之後改表單，這裡不會自動更新</p>':''}<p class="hint">小提示：點任何欄位，就會打開完整表單並跳到那一格。填好後請按「確認需求」。</p>${cards}`;
 }
 function sourceBody(p){
   const s=p.source;
+  if(p.leadId){
+    const digest=p.leadDigest||{},written=['聯絡人','電話','洽詢日期','需求類型'];
+    if(p.brief.region)written.push('縣市');
+    if(p.brief.houseType)written.push('屋況');
+    if(p.brief.renoType)written.push('裝修類型');
+    if(p.brief.budget)written.push('預算');
+    const needs=['size','timeline'].filter(k=>digest[k]).map(k=>LEAD_LABELS[k]);
+    if(digest.budget&&!p.brief.budget)needs.push('預算');
+    if(p.type==='其他設計')needs.push('服務');
+    const memo=['來源說明'];if(digest.contact_time)memo.push('方便聯絡');if(digest.area&&!p.brief.region)memo.push('地區');
+    if(String(p.notes||'').includes('建立時聯絡結果：'))memo.push('建立時聯絡結果');
+    return `<section class="card source-card"><div class="card-head"><h2>需求來源</h2></div><p>來自客戶名單，送出時間 ${s.submittedAt?esc(timeText(s.submittedAt)):'未提供'}</p><p>已寫入欄位：${esc(written.join('、'))}</p><p>寫在其他需求：${esc(needs.join('、')||'無')}</p><p>寫在備註：${esc(memo.join('、'))}</p>${p.type==='其他設計'&&p.brief.region?'<p class="muted">類型改成居家或商業空間後，縣市會出現在欄位裡</p>':''}<p id="lead-update-status" class="lead-update-status" role="status">核對名單中…</p></section>`;
+  }
   let body='<p>手動整理專案需求，填好後再確認需求。</p>';
   if(s.kind==='unknown')body='<p>未註明來源（舊資料），請選擇。</p>';
   if(s.kind==='meeting')body=`<form id="meeting-form"><label>會議記錄<textarea name="meetingText" rows="6">${esc(s.meetingText||'')}</textarea></label><label>參考檔名<input name="fileName" value="${esc(s.fileName||'')}"></label><p class="muted">僅記錄檔名，不保存檔案。貼上文字不會自動確認或改任何需求欄位。</p><div class="source-actions"><button type="submit" class="primary">儲存記錄</button><button type="button" data-action="meeting-edit">對照記錄填寫欄位</button></div></form>`;
-  if(s.kind==='client')body=`<p>${s.submittedAt?'已送出・手動登錄 '+esc(timeText(s.submittedAt)):'尚未登錄客戶送出'}</p><button data-action="client-submit">${s.submittedAt?'取消登錄':'記錄客戶已送出'}</button><p class="muted">之後串接 Messenger 機器人後，客戶送出會自動記錄。</p>`;
+  if(s.kind==='client')body=`<p>${s.submittedAt?'已送出・手動登錄 '+esc(timeText(s.submittedAt)):'尚未登錄客戶送出'}</p><button data-action="client-submit">${s.submittedAt?'取消登錄':'記錄客戶已送出'}</button><p class="muted">客戶名單會記錄 Messenger 表單的送出資料；這裡僅供手動建立的專案自行登錄。</p>`;
   return `<section class="card source-card"><div class="card-head"><h2>需求來源</h2></div><div class="segmented" aria-label="需求來源">${[['manual','手動建立'],['meeting','會議記錄整理'],['client','客戶填寫']].map(([k,label])=>`<button data-source="${k}" aria-pressed="${s.kind===k}">${label}</button>`).join('')}</div>${body}</section>`;
+}
+async function checkLeadUpdate(id){
+  const slot=$('#lead-update-status'),p=findProject(id);
+  if(!slot||!p?.leadId)return;
+  if(window.GenieAuth.getState().status!=='member'){slot.textContent='無法核對名單是否已更新';return;}
+  try{
+    const lead=await window.GenieLeads.fetchLead(p.leadId);
+    if(view.id!==id||view.step!=='brief'||!slot.isConnected)return;
+    if(!lead||!lead.answers||typeof lead.answers!=='object'||Array.isArray(lead.answers))throw Error('名單資料無效');
+    const latest=leadDigest(lead.answers),changed=LEAD_KEYS.filter(key=>latest[key]!==p.leadDigest?.[key]);
+    slot.textContent=changed.length?`名單在帶入之後改過：${changed.map(key=>LEAD_LABELS[key]).join('、')}。專案維持現在的內容。`:'';
+  }catch{if(slot.isConnected)slot.textContent='無法核對名單是否已更新';}
 }
 function strategyDocument(p,strategy){
   if(strategy.sections)return `<div class="doc strategy-document"><p class="muted">${strategy.source==='ai-paste'?'AI 貼回草稿':'策略草稿'}・${esc(timeText(strategy.at))}</p>${STRATEGY_KEYS.map(([key,label])=>`<section><h3>${esc(label)}</h3><p class="pre-wrap">${esc(strategy.sections[key]||'未填')}</p></section>`).join('')}</div>`;
@@ -557,7 +640,7 @@ function route(){
   const m=location.hash.match(/^#\/p\/([^/]+)(?:\/(\w+))?/);
   let p;try{p=m&&findProject(decodeURIComponent(m[1]));}catch{location.replace('#/');return;}
   if(m&&!p){location.replace('#/');return;}
-  if(p){view={id:p.id,step:STEPS.some(s=>s.id===m[2])?m[2]:'brief'};$('#list-view').hidden=true;$('#detail-view').hidden=false;renderDetail();const title=document.createElement('span');title.innerHTML=esc(`${p.name}｜Genie-Local v4`);document.title=title.textContent;}
+  if(p){view={id:p.id,step:STEPS.some(s=>s.id===m[2])?m[2]:'brief'};$('#list-view').hidden=true;$('#detail-view').hidden=false;try{renderDetail();}catch(error){console.warn('專案無法顯示',error);$('#detail-view').innerHTML='<p class="lead-error" role="alert">這筆專案無法顯示，請先匯出本機資料。</p>';}const title=document.createElement('span');title.innerHTML=esc(`${p.name}｜Genie-Local v4`);document.title=title.textContent;}
   else{view={id:null,step:'brief'};$('#detail-view').hidden=true;$('#list-view').hidden=false;render();document.title='潛在客戶｜Genie-Local v4';}
   $('main').scrollTop=0;
 }
@@ -592,7 +675,8 @@ function showAuth(auth) {
     $('.sidebar').hidden = false;
     $('main').hidden = false;
     $('#offline-banner').hidden = auth.status !== 'offline';
-    if (!workspaceVisible) { workspaceVisible = true; route(); if (storageWarning) toast('無法讀取先前資料，目前顯示示範內容。',{duration:10000}); }
+    $('#storage-warning').hidden = !storageWarning && !normalizationFailed;
+    if (!workspaceVisible) { workspaceVisible = true; route(); if (storageWarning||normalizationFailed) toast('部分資料無法讀取，請先匯出本機資料。',{duration:10000}); }
     else if (location.hash === '#/leads' && lastAuthStatus !== auth.status) {
       if (auth.status === 'member') window.GenieLeads.refresh();
       else window.GenieLeads.showOffline();
@@ -712,7 +796,7 @@ uncomplete:()=>{const p=findProject(view.id);if(commit(()=>delete p.steps[view.s
 'est-add':()=>changeEstimate(e=>e.rows.push({id:crypto.randomUUID(),item:'',qty:'',unit:'',price:''})),
 knowledge:()=>{let notes='';try{notes=localStorage.getItem('genie-local-notes')||'';}catch{}showInfo('知識庫',`<p class="muted">整理你的常用問答與專案需求，保存在這台瀏覽器。</p><form id="notes-form"><label>工作筆記<textarea name="knowledge" rows="10" maxlength="30000" placeholder="例如：第一次洽談需要確認的事項…">${esc(notes)}</textarea></label><div class="dialog-footer"><button type="submit" class="primary">儲存筆記</button></div></form>`);},
 account:()=>{let name='';try{name=localStorage.getItem('genie-local-name')||'';}catch{}const auth=window.GenieAuth.getState();showInfo('個人設定',`<div class="account-avatar"></div><p>登入身分：${esc(auth.displayName || auth.email)}</p><form id="account-form"><label>本機顯示名稱<input name="displayName" maxlength="60" value="${esc(name)}" placeholder="你的名字"></label><p class="muted">本機顯示名稱只存在這台瀏覽器，與登入身分分開。全站需登入；本機專案存在這台瀏覽器。共用裝置用完請登出。</p><div class="dialog-footer"><button class="primary" type="submit">儲存設定</button></div></form>`);},
-help:()=>showInfo('Genie-Local v6 使用說明','<p>六個步驟都能隨時打開查看，條件只限制生成與確認。</p><ol><li>需求總覽：選擇需求來源，補齊「必填」後按「確認需求」。會議記錄不會自動改寫欄位；客戶送出是手動登錄。</li><li>策略企劃：確認需求後按「複製 AI 指令」，將指令貼到自己的 AI App；用 App 複製整段回答，回網站按「貼上 AI 回覆」，檢查五欄預覽與警告後按「套用」，再逐欄修改並「標記完成」。可略過 AI 產生示範草稿；重新產生會保留上一版。</li><li>視覺發想與 3D：在其他工具完成後回來標記，或設為「本案不採用」。品牌、包裝、網站本版不提供 3D。</li><li>業務估價：填明細、稅別、有效期限與報價範圍，確認需求後才能標記完成。修改數量會解除坪數連動，可按「改回沿用」。</li><li>提案簡報：預覽所有採用的段落，引用步驟都完成後才能標記完成；尚無正式匯出。</li></ol><p>狀態：缺資料／可開始／已完成／需更新／不適用。修改需求或成果後會比對完成依據，顯示更新原因；電話與備註不影響狀態。</p><ul><li>表單支援類型切換保留草稿、Ctrl＋S 儲存、未儲存關閉提醒。</li><li>勾選可批次刪除，10 秒內可復原整批；連續刪除也會一併復原。</li><li>左側對話圖示可匯出 JSON 備份，目前不提供匯入。</li></ul><p class="muted">全站需登入。本機專案存在這台瀏覽器；「客戶名單」資料來自雲端資料庫（Messenger 表單）。共用或借用裝置時，用完請按登出。清除瀏覽器資料會移除本機記錄。</p>'),
+help:()=>showInfo('Genie-Local v7 使用說明','<p>六個步驟都能隨時打開查看，條件只限制生成與確認。</p><ol><li>需求總覽：選擇需求來源，補齊「必填」後按「確認需求」。會議記錄不會自動改寫欄位；客戶名單可按「帶入名單建立專案」，建立後仍須補齊並確認需求。</li><li>策略企劃：確認需求後按「複製 AI 指令」，將指令貼到自己的 AI App；用 App 複製整段回答，回網站按「貼上 AI 回覆」，檢查五欄預覽與警告後按「套用」，再逐欄修改並「標記完成」。可略過 AI 產生示範草稿；重新產生會保留上一版。</li><li>視覺發想與 3D：在其他工具完成後回來標記，或設為「本案不採用」。品牌、包裝、網站本版不提供 3D。</li><li>業務估價：填明細、稅別、有效期限與報價範圍，確認需求後才能標記完成。修改數量會解除坪數連動，可按「改回沿用」。</li><li>提案簡報：預覽所有採用的段落，引用步驟都完成後才能標記完成；尚無正式匯出。</li></ol><p>狀態：缺資料／可開始／已完成／需更新／不適用。修改需求或成果後會比對完成依據，顯示更新原因；電話與備註不影響狀態。</p><ul><li>表單支援類型切換保留草稿、Ctrl＋S 儲存、未儲存關閉提醒。</li><li>勾選可批次刪除，10 秒內可復原整批；連續刪除也會一併復原。</li><li>左側對話圖示可匯出 JSON 備份，目前不提供匯入。</li></ul><p class="muted">全站需登入。本機專案存在這台瀏覽器；「客戶名單」資料來自雲端資料庫（Messenger 表單）；帶入後的專案只存在這台瀏覽器。客人之後改表單，專案不會自動更新。共用或借用裝置時，用完請按登出。清除瀏覽器資料會移除本機記錄。</p>'),
 export:()=>{let notes='',name='';try{notes=localStorage.getItem('genie-local-notes')||'';name=localStorage.getItem('genie-local-name')||'';}catch{}const blob=new Blob([JSON.stringify({version:3,projects,notes,displayName:name},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='客戶資料備份.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('已匯出本機資料');}
 };
 
@@ -726,7 +810,7 @@ function undoDelete(){
   if(!commit(()=>{[...batches].reverse().forEach(batch=>batch.forEach(({project,index})=>{if(!findProject(project.id))projects.splice(index,0,project);}));})){
     toast('復原未儲存，資料尚未還原，請重試。',{actionLabel:'重試復原',onAction:undoDelete,duration:Math.max(1,undoState.until-Date.now())});return;
   }
-  page=Math.floor(Math.min(...batches.flat().map(x=>x.index))/pageSize);undoState=null;render();toast('專案已整批復原');
+  page=Math.floor(Math.min(...batches.flat().map(x=>x.index))/pageSize);undoState=null;render();window.GenieLeads.refreshProjects();toast('專案已整批復原');
 }
 
 /* ================= 事件 ================= */
@@ -753,7 +837,7 @@ if(b.dataset.source){const p=findProject(view.id);if(commit(()=>p.source.kind=b.
 if(b.dataset.skip){const p=findProject(view.id);if(commit(()=>{if(p.skip[b.dataset.skip])delete p.skip[b.dataset.skip];else p.skip[b.dataset.skip]=true;})){renderDetail();render();}return;}
 if(b.hasAttribute('data-est-delete'))return changeEstimate(e=>e.rows=e.rows.filter(r=>r.id!==b.closest('[data-est-id]').dataset.estId));
 if(b.hasAttribute('data-est-link'))return changeEstimate(e=>e.rows.find(r=>r.id===b.closest('[data-est-id]').dataset.estId).areaLink='on');
-if(b.dataset.copy){const p=findProject(b.dataset.copy);if(commit(()=>projects.unshift({...structuredClone(p),id:crypto.randomUUID(),name:p.name+'（副本）',steps:{},strategy:undefined,strategyPrev:undefined,strategyPending:undefined,strategyCompare:[],source:{kind:'manual'}}))){page=0;render();toast('已複製專案');}}
+if(b.dataset.copy){const p=findProject(b.dataset.copy);if(commit(()=>{const copy={...structuredClone(p),id:crypto.randomUUID(),name:p.name+'（副本）',steps:{},strategy:undefined,strategyPrev:undefined,strategyPending:undefined,strategyCompare:[],source:{kind:'manual'}};delete copy.leadId;delete copy.leadDigest;projects.unshift(copy);})){page=0;render();toast('已複製專案');}}
 if(b.dataset.delete)confirmDelete([b.dataset.delete]);
 if(b.dataset.page!==undefined){page=Number(b.dataset.page);render();$('main').scrollTop=0;}
 });

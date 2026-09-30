@@ -17,6 +17,7 @@ let root = null;
 let activeTab = 'pending', selectedFilter = 'all';
 let totals = { pending: null, contacted: null }, filteredCount = null;
 const saving = new Set();
+const creating = new Set();
 let undoTimer;
 
 function active() {
@@ -49,6 +50,19 @@ function undoMinutes(lead) {
   return Number.isFinite(until) && until > Date.now() ? Math.ceil((until - Date.now()) / 60000) : 0;
 }
 function findLead(id) { return Object.values(lists).flatMap(state => state.items).find(item => String(item.id) === String(id)); }
+async function fetchLead(id) {
+  if (window.GenieAuth.getState().status !== 'member') throw Error('離線');
+  const client = window.GenieAuth.getClient();
+  const run = () => client.from('customer_leads').select(columns).eq('id', id).eq('status', 'complete').maybeSingle();
+  let response = await run();
+  if (response.status === 401) {
+    const refreshed = await client.auth.refreshSession();
+    if (refreshed.error || !refreshed.data?.session) throw Error('名單驗證失敗');
+    response = await run();
+  }
+  if (response.error || !response.data) throw Error('名單讀取失敗');
+  return response.data;
+}
 const countText = value => Number.isFinite(value) ? String(value) : '—';
 function renderNavigation() {
   if (!root) return;
@@ -76,11 +90,14 @@ function card(lead, kind) {
   const messenger = /^\d+$/.test(messengerId);
   const minutes = kind === 'contacted' ? undoMinutes(lead) : 0;
   const resultButtons = Object.entries(results).map(([value, label]) => `<button type="button" class="lead-result" data-lead-result="${esc(value)}" aria-pressed="${lead.contact_result === value}" ${saving.has(String(lead.id)) ? 'disabled' : ''}>${esc(label)}</button>`).join('');
+  const existing = window.GenieProjects.projectsForLead(lead.id).length > 0;
+  const createDisabled = creating.has(String(lead.id)) || (!existing && window.GenieAuth.getState().status !== 'member');
   return `<article class="lead-card" data-lead-id="${esc(lead.id)}">
     ${kind === 'contacted' ? `<strong class="lead-result-heading">${esc(results[lead.contact_result] || valueText(lead.contact_result))}</strong>` : ''}
     <div class="lead-card-top"><h3>${esc(valueText(lead.customer_name))}</h3><div class="lead-tags">${grade}${overdue ? '<span class="lead-tag lead-alert">超過 3 天未聯絡</span>' : ''}${lead.notification_status === 'failed' ? '<span class="lead-tag lead-alert">通知信寄送失敗</span>' : ''}</div></div>
     <dl class="lead-fields">${field('服務', lead.project_type)}${field('地區', lead.location)}${field('坪數', lead.interior_area)}${field('預算', lead.budget_range)}${field('開始時間', lead.start_time)}${field('方便聯絡時段', contactTime)}<div><dt>姓名</dt><dd>${esc(valueText(lead.customer_name))}</dd></div><div><dt>電話</dt><dd>${phoneHtml}</dd></div><div><dt>送出時間</dt><dd>${timeHtml(lead.completed_at)}</dd></div>${kind === 'contacted' ? `<div><dt>聯絡結果</dt><dd>${esc(results[lead.contact_result] || valueText(lead.contact_result))}</dd></div><div><dt>結果時間</dt><dd>${timeHtml(lead.contact_result_at)}</dd></div>` : ''}</dl>
     <div class="lead-actions"><div class="lead-results" role="group" aria-label="聯絡結果">${resultButtons}</div>${minutes ? `<div class="lead-undo-wrap"><button type="button" class="lead-undo" data-lead-undo ${saving.has(String(lead.id)) ? 'disabled' : ''}>收回，改回待聯絡</button><span class="lead-undo-time">還可收回 ${minutes} 分鐘</span></div>` : ''}${messenger ? '<button type="button" class="lead-messenger" data-lead-messenger>💬 Messenger</button>' : ''}</div>
+    <div class="lead-project-action"><button type="button" class="lead-project-button" data-lead-project ${createDisabled ? 'disabled' : ''}>${creating.has(String(lead.id)) ? '建立中…' : existing ? '開啟專案' : '帶入名單建立專案'}</button><span>只存在這台瀏覽器</span></div>
   </article>`;
 }
 function render(kind) {
@@ -88,7 +105,7 @@ function render(kind) {
   const state = lists[kind], target = root.querySelector(`[data-lead-section="${kind}"]`);
   if (!target) return;
   const empty = kind === 'contacted' && selectedFilter !== 'all' ? '目前篩選沒有資料' : sections[kind].empty;
-  const content = state.items.map(item => card(item, kind)).join('') || (state.loading ? '<p class="lead-state" role="status">讀取中…</p>' : state.error ? '' : `<p class="lead-state">${empty}</p>`);
+  const content = state.items.map((item, index) => { try { return card(item, kind); } catch (error) { console.warn(`第 ${index + 1} 筆名單無法顯示`, error); return '<p class="lead-error" role="alert">一筆名單無法顯示，請重新整理</p>'; } }).join('') || (state.loading ? '<p class="lead-state" role="status">讀取中…</p>' : state.error ? '' : `<p class="lead-state">${empty}</p>`);
   target.innerHTML = `<div class="lead-cards">${content}</div>${state.error ? '<p class="lead-error" role="alert">讀取失敗，請按重新整理</p>' : ''}${state.more && !state.error ? `<button type="button" class="lead-more" data-lead-more="${kind}" ${state.loading ? 'disabled' : ''}>${state.loading ? '讀取中…' : '載入更多'}</button>` : ''}`;
 }
 async function query(kind, offset, filter = selectedFilter, head = false) {
@@ -178,6 +195,7 @@ function activate() {
   }
 }
 function deactivate() { ++epoch; ++contactedTotalRequest; root = null; clearInterval(undoTimer); }
+function refreshProjects() { if (active()) Object.keys(sections).forEach(render); }
 async function saveResult(cardElement, value) {
   const id = cardElement.dataset.leadId;
   if (!id || !Object.hasOwn(results, value) || saving.has(id)) return;
@@ -269,6 +287,28 @@ async function openMessenger(lead) {
     notice(`已複製「${name}」，到收件匣搜尋欄貼上`);
   } catch { notice(`請到收件匣搜尋：${name}`); }
 }
+async function createProject(cardElement) {
+  const id = cardElement?.dataset.leadId;
+  if (!id || creating.has(id)) return;
+  if (window.GenieProjects.openLeadProject(id)) return;
+  if (window.GenieAuth.getState().status !== 'member') { notice('離線時無法建立專案'); return; }
+  creating.add(id);
+  const button = cardElement.querySelector('[data-lead-project]');
+  button.disabled = true;
+  button.textContent = '建立中…';
+  try {
+    const lead = await fetchLead(id);
+    if (!active()) { notice('已取消建立（離開了客戶名單）'); return; }
+    if (window.GenieProjects.openLeadProject(id)) return;
+    const result = window.GenieProjects.createFromLead(lead);
+    if (result.error) notice(result.error);
+  } catch {
+    notice(active()?'名單讀取失敗，請稍後再試':'已取消建立（離開了客戶名單）');
+  } finally {
+    creating.delete(id);
+    if (active()) render(activeTab);
+  }
+}
 $('#leads-view').addEventListener('click', event => {
   const tab = event.target.closest('[data-lead-tab]');
   if (tab) { activeTab = tab.dataset.leadTab; renderNavigation(); $('main').scrollTop = 0; tab.focus(); return; }
@@ -283,6 +323,8 @@ $('#leads-view').addEventListener('click', event => {
   }
   const result = event.target.closest('[data-lead-result]');
   if (result) { saveResult(result.closest('.lead-card'), result.dataset.leadResult); return; }
+  const project = event.target.closest('[data-lead-project]');
+  if (project) { createProject(project.closest('.lead-card')); return; }
   const undo = event.target.closest('[data-lead-undo]');
   if (undo) { const lead = findLead(undo.closest('.lead-card')?.dataset.leadId); if (lead) undoResult(lead); return; }
   const messenger = event.target.closest('[data-lead-messenger]');
@@ -291,5 +333,5 @@ $('#leads-view').addEventListener('click', event => {
   if (kind && sections[kind]) load(kind);
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-window.GenieLeads = { activate, deactivate, refresh, showOffline };
+window.GenieLeads = { activate, deactivate, refresh, showOffline, fetchLead, refreshProjects };
 })();
