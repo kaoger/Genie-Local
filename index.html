@@ -18,20 +18,22 @@
   <aside class="sidebar" aria-label="主選單" hidden>
     <button class="avatar" data-action="account" aria-label="本機個人設定" title="本機個人設定"></button>
     <nav class="nav-actions">
-      <button class="add-button" data-action="add" aria-label="新增專案" title="新增專案" data-icon="plus"></button>
-      <button data-action="home" aria-label="潛在客戶" title="潛在客戶" data-icon="folder" aria-current="page"></button>
-      <button data-action="leads" aria-label="客戶名單" title="客戶名單" data-icon="users"></button>
-      <button data-action="knowledge" aria-label="知識庫" title="知識庫" data-icon="book"></button>
-      <button data-action="account" aria-label="個人設定" title="個人設定" data-icon="user"></button>
-      <button data-action="export" aria-label="匯出本機資料" title="匯出本機資料" data-icon="code"></button>
+      <button class="add-button" data-action="add" aria-label="新增專案" title="新增專案" data-icon="plus"><span class="nav-icon"></span><span class="nav-label">新增</span></button>
+      <button data-action="home" aria-label="潛在客戶" title="潛在客戶" data-icon="folder" aria-current="page"><span class="nav-icon"></span><span class="nav-label">潛在客戶</span></button>
+      <button data-action="leads" aria-label="客戶名單" title="客戶名單" data-icon="users"><span class="nav-icon"></span><span class="nav-label">客戶名單</span></button>
+      <button data-action="knowledge" aria-label="知識庫" title="知識庫" data-icon="book"><span class="nav-icon"></span><span class="nav-label">知識庫</span></button>
+      <button data-action="account" aria-label="個人設定" title="個人設定" data-icon="user"><span class="nav-icon"></span><span class="nav-label">個人設定</span></button>
+      <button data-action="export" aria-label="匯出本機資料" title="匯出本機資料" data-icon="code"><span class="nav-icon"></span><span class="nav-label">匯出本機資料</span></button>
+      <button id="more-button" data-action="more" aria-label="更多" title="更多" aria-expanded="false" aria-controls="more-menu" data-icon="more" hidden><span class="nav-icon"></span><span class="nav-label">更多</span></button>
     </nav>
-    <div class="sidebar-bottom"><button data-action="signout" aria-label="登出" title="登出">登出</button><button class="help-button" data-action="help" aria-label="使用說明" title="使用說明" data-icon="help"></button></div>
+    <div class="sidebar-bottom"><button data-action="signout" aria-label="登出" title="登出">登出</button><button class="help-button" data-action="help" aria-label="使用說明" title="使用說明" data-icon="help"><span class="nav-icon"></span><span class="nav-label">使用說明</span></button></div>
+    <div id="more-menu" class="more-menu" role="group" aria-labelledby="more-button" hidden></div>
   </aside>
   <main hidden>
     <p id="storage-warning" class="storage-warning" role="alert" hidden>部分資料無法讀取，請先匯出本機資料。本次開啟暫停儲存，避免覆蓋原始資料。</p>
     <!-- 潛在客戶清單 -->
     <div id="list-view" hidden>
-      <header><h1>潛在客戶</h1></header>
+      <header class="list-header"><h1>潛在客戶</h1><div id="home-account"></div></header>
       <section class="content" aria-label="客戶清單">
         <div class="selection-bar" hidden><span id="selected-count"></span><button data-action="delete-selected">刪除所選</button><button data-action="clear-selection">取消選取</button></div>
         <label class="card-select-all"><input id="card-select-all" type="checkbox">全選本頁</label>

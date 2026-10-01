@@ -59,14 +59,20 @@ test('375、768、844、1280 四種寬度巡檢清單、六步驟、drawer、對
       const buttons = await page.locator('.sidebar button:visible').evaluateAll(elements => elements.map(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height })));
       expect(buttons.filter(size => size.width < 44 || size.height < 44)).toEqual([]);
       if (viewport.width === 375 || viewport.width === 844) {
-        const padding = await page.locator('.leads-content').evaluate(el => parseFloat(getComputedStyle(el).paddingBottom));
-        expect(padding).toBeGreaterThanOrEqual(150);
+        await page.locator('main').evaluate(el => { el.scrollTop = el.scrollHeight; });
+        const bottom = await page.locator('.leads-content').evaluate(el => {
+          const padding = parseFloat(getComputedStyle(el).paddingBottom);
+          return { padding, content: el.getBoundingClientRect().bottom - padding };
+        });
+        const bar = await page.locator('.sidebar').boundingBox();
+        expect(bottom.padding).toBeGreaterThanOrEqual(bar.height + 8);
+        expect(bottom.content).toBeLessThanOrEqual(bar.y);
       }
     }
   }
 });
 
-test('375px 離線橫幅換行後，main 留出實際高度且側欄可捲', async ({ page }) => {
+test('375px 離線橫幅換行後，main 留出實際高度且底部四格完整可點', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 390 });
   await page.locator('#offline-banner span').evaluate(el => { el.textContent = '尚未重新確認成員（離線），請等待網路恢復後重新確認登入身分'; });
   await page.locator('#offline-banner').evaluate(el => { el.hidden = false; });
@@ -78,10 +84,19 @@ test('375px 離線橫幅換行後，main 留出實際高度且側欄可捲', asy
   const sizes = await page.evaluate(() => ({
     padding: parseFloat(getComputedStyle(document.querySelector('main')).paddingTop),
     height: document.querySelector('#offline-banner').getBoundingClientRect().height,
-    sidebarScroll: document.querySelector('.sidebar').scrollHeight,
-    sidebarHeight: document.querySelector('.sidebar').clientHeight,
+    bannerLeft: document.querySelector('#offline-banner').getBoundingClientRect().left,
+    mainLeft: document.querySelector('main').getBoundingClientRect().left,
   }));
   expect(sizes.padding).toBeGreaterThanOrEqual(sizes.height - 1);
-  expect(sizes.sidebarScroll).toBeGreaterThan(sizes.sidebarHeight);
+  expect(sizes.bannerLeft).toBe(0);
+  expect(sizes.mainLeft).toBe(0);
+  await expect(page.locator('.sidebar button:visible')).toHaveCount(4);
+  const bar = await page.locator('.sidebar').boundingBox();
+  expect(bar.y + bar.height).toBe(390);
+  const buttons = await page.locator('.sidebar button:visible').evaluateAll(elements => elements.map(el => {
+    const rect = el.getBoundingClientRect();
+    return { width: rect.width, height: rect.height, bottom: rect.bottom };
+  }));
+  expect(buttons.every(b => b.width >= 44 && b.height >= 44 && b.bottom <= 390)).toBe(true);
   await expectFits(page, 375);
 });

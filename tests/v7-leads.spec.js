@@ -347,6 +347,7 @@ test('舊資料與單筆損壞隔離，原 localStorage 不被覆蓋', async ({ 
   await page.locator('#editor [data-close]').first().click();
   expect(await page.evaluate(key => localStorage.getItem(key), KEY)).toBe(raw);
   const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: '更多', exact: true }).click();
   await page.getByRole('button', { name: '匯出本機資料' }).click();
   await download;
   expect(await page.evaluate(key => localStorage.getItem(key), KEY)).toBe(raw);
