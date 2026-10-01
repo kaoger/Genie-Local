@@ -33,7 +33,7 @@
     <p id="storage-warning" class="storage-warning" role="alert" hidden>部分資料無法讀取，請先匯出本機資料。本次開啟暫停儲存，避免覆蓋原始資料。</p>
     <!-- 潛在客戶清單 -->
     <div id="list-view" hidden>
-      <header class="list-header"><h1>潛在客戶</h1><div id="home-account"></div></header>
+      <header class="list-header page-header"><h1 tabindex="-1">潛在客戶</h1><div id="home-account"></div></header>
       <section class="content" aria-label="客戶清單">
         <div class="selection-bar" hidden><span id="selected-count"></span><button data-action="delete-selected">刪除所選</button><button data-action="clear-selection">取消選取</button></div>
         <label class="card-select-all"><input id="card-select-all" type="checkbox">全選本頁</label>
@@ -53,6 +53,7 @@
     <div id="detail-view" hidden></div>
     <div id="leads-view" hidden></div>
   </main>
+  <button id="back-to-top" type="button" aria-label="回到頂部" data-icon="up" hidden></button>
 
   <!-- 快速新增專案 -->
   <dialog id="editor" aria-labelledby="editor-title">

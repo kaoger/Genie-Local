@@ -5,6 +5,7 @@ const icons={plus:'<path d="M12 5v14M5 12h14"/>',folder:'<path d="M3 7V5a2 2 0 0
 const icon = name => `<svg aria-hidden="true" viewBox="0 0 24 24">${icons[name]||''}</svg>`;
 icons.users='<circle cx="8" cy="8" r="3"/><path d="M2 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6m1 4a5 5 0 0 1 3 5"/>';
 icons.more='<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>';
+icons.up='<path d="M12 19V5m-6 6 6-6 6 6"/>';
 document.querySelectorAll('[data-icon]').forEach(el=>(el.querySelector('.nav-icon')||el).innerHTML=icon(el.dataset.icon));
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -46,6 +47,73 @@ $('#info-dialog').addEventListener('close',()=>{
   if(infoFromMore&&mobileNav.matches&&!$('.sidebar').hidden)$('#more-button').focus();
   infoFromMore=false;
 });
+
+/* ================= 手機清單回到頂部 ================= */
+const scrollMain=$('main'), backToTop=$('#back-to-top');
+const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)');
+let backToTopVisible=false, topFrame=0, topRequest=null;
+function listTitle(){
+  if(!$('#list-view').hidden)return $('#list-view .page-header h1');
+  if(!$('#leads-view').hidden)return $('#leads-view .page-header h1');
+  return null;
+}
+function cancelTopRequest(){topRequest=null;}
+function syncBackToTop(){
+  const title=listTitle(), dialogOpen=!!$('dialog[open]');
+  const eligible=mobileNav.matches&&!scrollMain.hidden&&canUseWorkspace()&&!!title;
+  if(topRequest&&(!eligible||dialogOpen||topRequest.hash!==location.hash||topRequest.title!==title))cancelTopRequest();
+  // 讀取執行當下的捲動值；80–240px 保留先前狀態。
+  if(!eligible||scrollMain.scrollTop<80)backToTopVisible=false;
+  else if(scrollMain.scrollTop>240)backToTopVisible=true;
+  backToTop.hidden=!backToTopVisible||!eligible||dialogOpen||!$('#toast').hidden||!$('#more-menu').hidden;
+}
+function finishTopRequest(){
+  syncBackToTop();
+  if(!topRequest)return;
+  const request=topRequest;
+  cancelTopRequest();
+  if(scrollMain.scrollTop===0)request.title.focus({preventScroll:true});
+}
+function scheduleTopUpdate(){
+  if(topFrame)return;
+  topFrame=requestAnimationFrame(()=>{
+    topFrame=0;
+    syncBackToTop();
+    if(!topRequest)return;
+    if(scrollMain.scrollTop===0){finishTopRequest();return;}
+    // scrollend 的等效判斷，也處理使用者中止平滑捲動。
+    if(topRequest.last===scrollMain.scrollTop)topRequest.still++;
+    else{topRequest.last=scrollMain.scrollTop;topRequest.still=0;}
+    if(topRequest.still>=12){cancelTopRequest();return;}
+    scheduleTopUpdate();
+  });
+}
+backToTop.addEventListener('click',()=>{
+  syncBackToTop();
+  if(backToTop.hidden)return;
+  topRequest={title:listTitle(),hash:location.hash,last:scrollMain.scrollTop,still:0};
+  scrollMain.scrollTo({top:0,behavior:reducedMotion.matches?'instant':'smooth'});
+  scheduleTopUpdate();
+});
+scrollMain.addEventListener('scroll',scheduleTopUpdate,{passive:true});
+scrollMain.addEventListener('scrollend',finishTopRequest);
+window.addEventListener('resize',scheduleTopUpdate);
+// 名單重畫、分類切換與資料縮短都會改變內容；按鈕不在重畫區內。
+const topContentObserver=new MutationObserver(scheduleTopUpdate);
+topContentObserver.observe(scrollMain,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden']});
+const topSizeObserver=new ResizeObserver(scheduleTopUpdate);
+[scrollMain,$('#list-view'),$('#leads-view')].forEach(el=>topSizeObserver.observe(el));
+const topOverlayObserver=new MutationObserver(syncBackToTop);
+[$('#toast'),$('#more-menu'),...document.querySelectorAll('dialog')].forEach(el=>{
+  topOverlayObserver.observe(el,{attributes:true,attributeFilter:['hidden','open']});
+});
+function syncLeadsRefresh(){
+  const button=$('#leads-view .lead-refresh');
+  if(!button)return;
+  if(mobileNav.matches)$('#leads-view .leads-content').prepend(button);
+  else $('#leads-view .leads-account').before(button);
+}
+mobileNav.addEventListener('change',()=>{syncLeadsRefresh();syncBackToTop();});
 
 /* ================= 表單欄位定義 =================
    想新增或調整欄位，只要改這裡：
@@ -692,22 +760,27 @@ function updateAccounts() {
 function renderLeads() {
   if (location.hash !== '#/leads' || !canUseWorkspace()) return;
   const { status } = window.GenieAuth.getState();
-  let head = '<h1>客戶名單</h1>', body = '';
+  let head = '<h1 tabindex="-1">客戶名單</h1>', body = '';
   if (status === 'member' || status === 'offline') {
     head += '<button type="button" class="lead-refresh" data-action="lead-refresh">重新整理</button>';
     head += accountHtml();
     body = '<div id="leads-list" class="leads-list"><div class="lead-tabs" role="tablist" aria-label="客戶名單分類"><button type="button" role="tab" id="lead-tab-pending" data-lead-tab="pending" aria-controls="lead-panel-pending" aria-selected="true">待聯絡 <span data-lead-count="pending">—</span></button><button type="button" role="tab" id="lead-tab-contacted" data-lead-tab="contacted" aria-controls="lead-panel-contacted" aria-selected="false">已回報 <span data-lead-count="contacted">—</span></button></div><p class="lead-messenger-hint">按 Messenger 會開啟收件匣並複製客人姓名，貼到搜尋欄即可找到對話；Messenger 只能在客人最後傳訊後一段時間內回覆，超過請改打電話。</p><section id="lead-panel-pending" role="tabpanel" aria-labelledby="lead-tab-pending" data-lead-panel="pending"><div data-lead-section="pending"></div></section><section id="lead-panel-contacted" role="tabpanel" aria-labelledby="lead-tab-contacted" data-lead-panel="contacted" hidden><div class="lead-filters" role="group" aria-label="聯絡結果篩選"><button type="button" data-lead-filter="all" aria-pressed="true">全部 <span data-filter-count></span></button><button type="button" data-lead-filter="contacted" aria-pressed="false">已聯絡 <span data-filter-count></span></button><button type="button" data-lead-filter="site_visit" aria-pressed="false">約丈量 <span data-filter-count></span></button><button type="button" data-lead-filter="not_interested" aria-pressed="false">沒興趣 <span data-filter-count></span></button><button type="button" data-lead-filter="unreachable" aria-pressed="false">聯絡不上 <span data-filter-count></span></button></div><div data-lead-section="contacted"></div></section></div>';
   }
-  $('#leads-view').innerHTML = `<header class="leads-header">${head}</header><section class="leads-content">${body}</section>`;
+  $('#leads-view').innerHTML = `<header class="leads-header page-header">${head}</header><section class="leads-content">${body}</section>`;
+  syncLeadsRefresh();
   if (status === 'member') window.GenieLeads.activate();
   else {
     window.GenieLeads.activate();
     window.GenieLeads.showOffline();
   }
+  scheduleTopUpdate();
 }
 
 /* ================= 頁面切換（網址 #/p/專案/步驟、#/leads） ================= */
 function route(){
+  cancelTopRequest();
+  backToTopVisible=false;
+  backToTop.hidden=true;
   if (!canUseWorkspace()) return;
   const leads = location.hash === '#/leads';
   $('#leads-view').hidden = !leads;
@@ -719,6 +792,7 @@ function route(){
     document.title = '客戶名單｜Genie-Local v5';
     renderLeads();
     $('main').scrollTop = 0;
+    syncBackToTop();
     return;
   }
   window.GenieLeads.deactivate();
@@ -728,6 +802,7 @@ function route(){
   if(p){view={id:p.id,step:STEPS.some(s=>s.id===m[2])?m[2]:'brief'};$('#list-view').hidden=true;$('#detail-view').hidden=false;try{renderDetail();}catch(error){console.warn('專案無法顯示',error);$('#detail-view').innerHTML='<p class="lead-error" role="alert">這筆專案無法顯示，請先匯出本機資料。</p>';}const title=document.createElement('span');title.innerHTML=esc(`${p.name}｜Genie-Local v4`);document.title=title.textContent;}
   else{view={id:null,step:'brief'};$('#detail-view').hidden=true;$('#list-view').hidden=false;render();document.title='潛在客戶｜Genie-Local v4';}
   $('main').scrollTop=0;
+  syncBackToTop();
 }
 
 /* ================= 全站登入殼層 ================= */
@@ -738,6 +813,9 @@ const canUseWorkspace = () => {
   return auth.status === 'member' || (auth.status === 'offline' && auth.localAccess);
 };
 function hideWorkspace() {
+  cancelTopRequest();
+  backToTopVisible=false;
+  backToTop.hidden=true;
   workspaceVisible = false;
   closeMore(false);
   infoFromMore = false;

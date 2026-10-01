@@ -350,16 +350,22 @@ summary{cursor:pointer;font-weight:600;color:#343b43;overflow-wrap:anywhere}.car
   .list-header{height:auto;min-height:52px;gap:8px;padding:6px 16px}
   .list-header h1{flex-shrink:0}
   #home-account{display:block;min-width:0;margin-left:auto}
-  .leads-header{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;padding:6px 16px}
+  .leads-header{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;padding:6px 16px}
   .leads-header h1{grid-column:1;grid-row:1}
-  .leads-header .lead-refresh{grid-column:2;grid-row:1;justify-self:end;min-height:44px}
-  .leads-header .leads-account{grid-column:3;grid-row:1;justify-self:end}
+  .leads-header .leads-account{grid-column:2;grid-row:1;justify-self:end}
   .leads-account{gap:6px;flex-wrap:nowrap}
   .leads-account button{min-height:44px;min-width:44px;padding:8px 4px}
   .leads-account .account-name{min-width:0;width:clamp(44px,25vw,180px);max-width:clamp(44px,25vw,180px);text-align:right}
 }
-@media (max-width:420px){
-  .leads-header{grid-template-columns:auto minmax(0,1fr)}
-  .leads-header .leads-account{grid-column:2}
-  .leads-header .lead-refresh{grid-column:1/-1;grid-row:2;justify-self:start}
+/* ================= 手機清單頁首與回到頂部 ================= */
+@media (max-width:600px), (max-height:500px){
+  :root{--back-to-top-size:44px;--back-to-top-gap:16px}
+  .page-header{position:sticky;top:var(--offline-height, 0px);z-index:5;background:#fff;padding-top:calc(6px + env(safe-area-inset-top, 0px))}
+  /* main 的 padding 也會偏移 sticky 的參考邊緣，清單改用頁首前的留白。 */
+  body:has(.offline-banner:not([hidden])) main:has(>#list-view:not([hidden]),>#leads-view:not([hidden])){padding-top:0}
+  body:has(.offline-banner:not([hidden])) .page-header{margin-top:var(--offline-height, 0px)}
+  .leads-content>.lead-refresh{display:block;min-height:44px;min-width:44px;margin-bottom:16px}
+  #list-view>.content,#leads-view>.leads-content{padding-bottom:calc(var(--mobile-bottom-space) + var(--back-to-top-size) + var(--back-to-top-gap))}
+  #back-to-top{position:fixed;right:16px;bottom:var(--mobile-bottom-space);z-index:8;width:var(--back-to-top-size);height:var(--back-to-top-size);border-radius:50%;display:grid;place-items:center;background:#fff;color:#222;border:1px solid #cbd0d6;box-shadow:0 4px 16px #0002}
+  #back-to-top:hover{background:#e8ebee}
 }

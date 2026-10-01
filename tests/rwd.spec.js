@@ -72,22 +72,22 @@ test('375、768、844、1280 四種寬度巡檢清單、六步驟、drawer、對
   }
 });
 
-test('375px 離線橫幅換行後，main 留出實際高度且底部四格完整可點', async ({ page }) => {
+test('375px 離線橫幅換行後，頁首貼齊橫幅下緣且底部四格完整可點', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 390 });
   await page.locator('#offline-banner span').evaluate(el => { el.textContent = '尚未重新確認成員（離線），請等待網路恢復後重新確認登入身分'; });
   await page.locator('#offline-banner').evaluate(el => { el.hidden = false; });
   await expect.poll(() => page.evaluate(() => {
-    const padding = parseFloat(getComputedStyle(document.querySelector('main')).paddingTop);
+    const headerTop = document.querySelector('.list-header').getBoundingClientRect().top;
     const height = document.querySelector('#offline-banner').getBoundingClientRect().height;
-    return height > 44 && padding >= height - 1;
+    return height > 44 && Math.abs(headerTop - height) <= 1;
   })).toBe(true);
   const sizes = await page.evaluate(() => ({
-    padding: parseFloat(getComputedStyle(document.querySelector('main')).paddingTop),
+    headerTop: document.querySelector('.list-header').getBoundingClientRect().top,
     height: document.querySelector('#offline-banner').getBoundingClientRect().height,
     bannerLeft: document.querySelector('#offline-banner').getBoundingClientRect().left,
     mainLeft: document.querySelector('main').getBoundingClientRect().left,
   }));
-  expect(sizes.padding).toBeGreaterThanOrEqual(sizes.height - 1);
+  expect(Math.abs(sizes.headerTop - sizes.height)).toBeLessThanOrEqual(1);
   expect(sizes.bannerLeft).toBe(0);
   expect(sizes.mainLeft).toBe(0);
   await expect(page.locator('.sidebar button:visible')).toHaveCount(4);

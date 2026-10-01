@@ -15,10 +15,12 @@ async function expectClosed(page) {
 }
 
 async function expectAboveBar(page, locator) {
-  await page.locator('main').evaluate(el => { el.scrollTop = el.scrollHeight; });
   const bar = await page.locator('.sidebar').boundingBox();
-  const rect = await locator.boundingBox();
-  expect(rect.y + rect.height).toBeLessThanOrEqual(bar.y);
+  await expect.poll(async () => {
+    await page.locator('main').evaluate(el => { el.scrollTop = el.scrollHeight; });
+    const rect = await locator.boundingBox();
+    return rect ? rect.y + rect.height : Infinity;
+  }).toBeLessThanOrEqual(bar.y);
   const widths = await page.evaluate(() => ({ document: document.documentElement.scrollWidth,
     main: document.querySelector('main').scrollWidth - document.querySelector('main').clientWidth }));
   expect(widths.document).toBeLessThanOrEqual(page.viewportSize().width);
@@ -168,12 +170,12 @@ for (const viewport of phones) {
     await expectAboveBar(page, page.locator('.lead-more:visible'));
     await home.click();
     const id = await createProject(page);
+    await page.locator('#dismiss-toast').click();
     await expect(home).toHaveAttribute('aria-current', 'page');
-    const paddings = [];
     for (const step of STEPS) {
       await goStep(page, step);
       await expectAboveBar(page, page.locator('.detail-body> :last-child'));
-      paddings.push(await page.locator('.detail-body').evaluate(el => getComputedStyle(el).paddingBottom));
+      await expect(page.locator('#back-to-top')).toBeHidden();
     }
     await leads.click();
     await page.goBack();
@@ -184,10 +186,19 @@ for (const viewport of phones) {
     await expect(more(page)).not.toHaveAttribute('aria-current');
     await expect(page.locator('[data-action="add"]')).not.toHaveAttribute('aria-current');
     await home.click();
-    paddings.push(await page.locator('.content').evaluate(el => getComputedStyle(el).paddingBottom));
+    await expectAboveBar(page, page.locator('#list-view footer'));
+    const homeActions = await page.locator('.project-card-actions').last().boundingBox();
+    await expect(page.locator('#back-to-top')).toBeVisible();
+    expect(homeActions.y + homeActions.height).toBeLessThan((await page.locator('#back-to-top').boundingBox()).y);
     await leads.click();
-    paddings.push(await page.locator('.leads-content').evaluate(el => getComputedStyle(el).paddingBottom));
-    expect(new Set(paddings).size).toBe(1);
+    await expect(page.locator('.lead-card:visible')).toHaveCount(50);
+    await expectAboveBar(page, page.locator('.lead-project-action:visible').last());
+    await expect(page.locator('#back-to-top')).toBeVisible();
+    const leadActions = await page.locator('.lead-actions:visible').last().boundingBox();
+    const projectAction = await page.locator('.lead-project-action:visible').last().boundingBox();
+    const topButton = await page.locator('#back-to-top').boundingBox();
+    expect(leadActions.y + leadActions.height).toBeLessThan(topButton.y);
+    expect(projectAction.y + projectAction.height).toBeLessThan(topButton.y);
     await expect(page.locator('#detail-view .leads-account')).toHaveCount(0);
   });
 
@@ -236,13 +247,12 @@ for (const viewport of phones) {
       await page.locator(`[data-action="${view}"]`).click();
       const name = page.locator(view === 'home' ? '#home-account .account-name' : '#leads-view .account-name');
       await expect(name).toHaveText(email);
-      const style = await name.evaluate(el => {
+      await expect.poll(() => name.evaluate(el => {
         const css = getComputedStyle(el), canvas = document.createElement('canvas').getContext('2d');
         canvas.font = css.font;
         return { clipped: canvas.measureText(el.textContent).width > el.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight),
           ellipsis: css.textOverflow, minWidth: css.minWidth, overflow: css.overflowX, wrap: css.whiteSpace };
-      });
-      expect(style).toEqual({ clipped: true, ellipsis: 'ellipsis', minWidth: '0px', overflow: 'hidden', wrap: 'nowrap' });
+      })).toEqual({ clipped: true, ellipsis: 'ellipsis', minWidth: '0px', overflow: 'hidden', wrap: 'nowrap' });
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(viewport.width);
     }
     await page.screenshot({ path: test.info().outputPath(`account-${viewport.width}.png`) });
