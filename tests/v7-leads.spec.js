@@ -61,19 +61,70 @@ test('帶入最新名單並依欄位分流，需求仍須確認', async ({ page,
   await card.locator('[data-lead-project]').click();
   await expect(page.locator('#toast-text')).toHaveText('已建立專案（名單的聯絡結果沒有改變）');
   const [p] = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), KEY);
-  expect(p).toMatchObject({ name: '最新姓名 台南 舊屋翻新', contact: '最新姓名', phone: '0912345678', date: '2026-10-01', type: '居家裝潢設計', leadId: 'fresh' });
-  expect(p.brief).toMatchObject({ region: '台南市', houseType: '老屋翻新', budget: '100–200 萬' });
+  expect(p).toMatchObject({ name: '最新姓名｜台南 老屋翻新 21–30 坪', contact: '最新姓名', phone: '0912345678', date: '2026-10-01', type: '居家裝潢設計', leadId: 'fresh' });
+  expect(p.brief).toMatchObject({ region: '台南市', houseType: '老屋翻新', areaRange: '21–30 坪', contactTime: ['上午 8–12 點'], budget: '100–200 萬' });
   expect(p.brief.area).toBeUndefined();
-  expect(p.brief.contactTime).toBeUndefined();
-  expect(p.brief.needsNote).toContain('坪數（客人勾選）：21–30 坪');
   expect(p.brief.needsNote).toContain('預計開始（客人勾選）：1–3 個月');
   expect(p.brief.needsNote).not.toMatch(/最新姓名|0912345678|台南/);
-  expect(p.notes).toContain('方便聯絡（客人勾選）：上午 8–12 點');
+  expect(p.notes).not.toContain('方便聯絡（客人勾選）');
   expect(p.leadDigest).toEqual({ service: '舊屋翻新', area: '台南', size: '21–30 坪', timeline: '1–3 個月', budget: '100–200 萬', name: '最新姓名', phone: '0912345678', contact_time: '上午 8–12 點' });
   await expect(page.locator('#status-slot [data-action="complete"]')).toBeDisabled();
   await expect(page.locator('.source-card')).toContainText('來自客戶名單，送出時間');
+  await expect(page.locator('.source-card')).toContainText('已寫入欄位：聯絡人、電話、洽詢日期、需求類型、縣市、屋況、預算、坪數區間、方便聯絡');
+  await expect(page.locator('.source-card')).toContainText('名稱是建立當下的簡稱');
   await expect(page.locator('.source-card [data-action="client-submit"]')).toHaveCount(0);
   expect(api.reads.some(url => url.searchParams.get('id') === 'eq.fresh')).toBe(true);
+});
+
+test('坪數區間依類型與選項分流，來源卡依實際位置顯示', async ({ page, api }) => {
+  const cases = [
+    ['home', '新成屋裝潢', '20 坪以下', '20 坪以下'],
+    ['space', '商業空間', '31–40 坪', '31–40 坪'],
+    ['unknown-size', '商業空間', '20-30 坪', null],
+    ['other', '其他服務', '21–30 坪', null],
+  ];
+  api.rows = cases.map(([id, service, size]) => row(id, { answers: answers({ service, size }) }));
+  for (const [id, , size, expected] of cases) {
+    const p = await create(page, id);
+    expect(p.brief.areaRange ?? null).toBe(expected);
+    expect(p.brief.needsNote || '').toContain(expected ? '預計開始（客人勾選）' : `坪數（客人勾選）：${size}`);
+    if (expected) expect(p.brief.needsNote).not.toContain('坪數（客人勾選）');
+    await expect(page.locator('.source-card')).toContainText(expected ? '已寫入欄位：' : '寫在其他需求：坪數');
+    if (expected) await expect(page.locator('.source-card')).toContainText('坪數區間');
+  }
+});
+
+test('名稱使用全形分隔、縣市及服務短名，無效坪數省略', async ({ page, api }) => {
+  const cases = [
+    ['hs', '新竹市', '新成屋裝潢', '20 坪以下', '高旭陽｜新竹市 新成屋 20 坪以下'],
+    ['hc', '新竹縣', '舊屋翻新', '21–30 坪', '高旭陽｜新竹縣 老屋翻新 21–30 坪'],
+    ['cs', '嘉義市', '局部裝修', '31–40 坪', '高旭陽｜嘉義市 局部翻修 31–40 坪'],
+    ['cc', '嘉義縣', '商業空間', '41–60 坪', '高旭陽｜嘉義縣 商業空間 41–60 坪'],
+    ['c', '嘉義', '其他服務', '61 坪以上', '高旭陽｜嘉義 其他 61 坪以上'],
+    ['u', '未知地區', '未知服務', '尚未確定', '高旭陽｜未知地區 未知服務'],
+    ['prototype', '台北市', 'constructor', '', '高旭陽｜台北 constructor'],
+    ['empty', '', '', '', '未留姓名'],
+  ];
+  api.rows = cases.map(([id, area, service, size]) => row(id, { answers: answers({ area, service, size, name: id === 'empty' ? '' : '高旭陽' }) }));
+  for (const [id, , , , expected] of cases) expect((await create(page, id)).name).toBe(expected);
+});
+
+test('三種逐字聯絡時段帶入欄位；其餘原文留在備註', async ({ page, api }) => {
+  const values = ['上午 8–12 點', '下午 1–5 點', '晚上 6–9 點', '平日白天', '上午 8-12 點'];
+  api.rows = values.map((contact_time, i) => row(`time-${i}`, { answers: answers({ contact_time }) }));
+  for (let i = 0; i < values.length; i++) {
+    const p = await create(page, `time-${i}`);
+    if (i < 3) {
+      expect(p.brief.contactTime).toEqual([values[i]]);
+      expect(p.notes).not.toContain('方便聯絡（客人勾選）');
+      await expect(page.locator('.source-card')).toContainText('方便聯絡');
+    } else {
+      expect(p.brief.contactTime).toBeUndefined();
+      expect(p.notes).toContain(`方便聯絡（客人勾選）：${values[i]}`);
+    }
+  }
+  await page.getByRole('button', { name: '編輯全部資料' }).click();
+  await expect(page.locator('#drawer')).toContainText('時段有重疊，帶入客人勾的即可，不必再勾平日白天／晚上。');
 });
 
 for (const [service, expectedType, expectedField] of [
@@ -115,7 +166,7 @@ for (const [label, form, expected] of [
     if (!Object.hasOwn(form, 'area_other')) delete api.rows[0].answers.area_other;
     const p = await create(page, 'region');
     expect(p.brief.region || '').toBe(expected);
-    expect(p.name).toContain(form.area === '其他地區' ? form.area_other : form.area);
+    expect(p.name).toContain(['新竹市','新竹縣','嘉義市','嘉義縣'].includes(expected) ? expected : expected ? expected.replace(/[市縣]$/, '') : form.area === '其他地區' ? form.area_other : form.area);
     if (!expected) expect(p.notes).toContain(`地區（客人填寫）：${form.area === '其他地區' ? form.area_other : form.area}`);
     expect(p.brief.needsNote).not.toContain(form.area === '其他地區' ? form.area_other : form.area);
   });
@@ -128,7 +179,8 @@ test('尚未確定坪數、無效時間、空姓名及 XSS 原文安全', async 
   expect(p.date).toBe('');
   expect(p.source.submittedAt).toBeUndefined();
   expect(p.brief.area).toBeUndefined();
-  expect(p.brief.needsNote).toContain('尚未確定');
+  expect(p.brief.areaRange).toBeUndefined();
+  expect(p.brief.needsNote).toContain('坪數（客人勾選）：尚未確定');
   expect(p.brief.needsNote).toContain(`未知服務${payload}`);
   expect(p.brief.needsNote).not.toContain(place);
   expect(p.notes).toContain(place);
@@ -221,6 +273,8 @@ test('複製清除名單關聯；刪除與復原更新名單按鈕', async ({ pa
   const copy = (await page.evaluate(key => JSON.parse(localStorage.getItem(key)), KEY))[0];
   expect(copy.leadId).toBeUndefined();
   expect(copy.leadDigest).toBeUndefined();
+  expect(copy.brief.areaRange).toBe('21–30 坪');
+  expect(copy.brief.contactTime).toEqual(['上午 8–12 點']);
   await page.locator(`#rows [data-delete="${p.id}"]`).click();
   await page.locator('#confirm-delete').click();
   const card = await leads(page, 'lifecycle');

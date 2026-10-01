@@ -16,12 +16,14 @@ const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=
    type      → text / email / tel / date / month / number / select / textarea / chips / layout */
 const TYPES=['居家裝潢設計','商業空間設計','展覽空間設計','品牌設計','包裝設計','網站設計','其他設計'];
 const COUNTIES=['台北市','新北市','桃園市','台中市','台南市','高雄市','基隆市','新竹市','嘉義市','新竹縣','苗栗縣','彰化縣','南投縣','雲林縣','嘉義縣','屏東縣','宜蘭縣','花蓮縣','台東縣','澎湖縣','金門縣','連江縣'];
+const AREA_RANGES=['20 坪以下','21–30 坪','31–40 坪','41–60 坪','61 坪以上','尚未確定'];
+const CONTACT_TIMES=['上午 8–12 點','下午 1–5 點','晚上 6–9 點'];
 const CONTACT_SECTION={id:'contact',title:'聯絡資訊',fields:[
   {key:'name',label:'專案名稱',type:'text',top:true,required:true,wide:true,placeholder:'例如：王小姐 台中沙鹿 新成屋'},
   {key:'contact',label:'聯絡人',type:'text',top:true},
   {key:'phone',label:'電話',type:'tel',top:true,placeholder:'0912-345-678'},
   {key:'email',label:'電子信箱',type:'email',top:true},
-  {key:'contactTime',label:'方便聯絡的時間',type:'chips',multi:true,options:['平日白天','平日晚上','週末','隨時']},
+  {key:'contactTime',label:'方便聯絡的時間',type:'chips',multi:true,options:[...CONTACT_TIMES,'平日白天','平日晚上','週末','隨時'],hint:'時段有重疊，帶入客人勾的即可，不必再勾平日白天／晚上。'},
   {key:'type',label:'需求類型',type:'select',top:true,options:TYPES,noEmpty:true},
   {key:'date',label:'洽詢日期',type:'date',top:true},
   {key:'due',label:'專案到期日',type:'date',top:true}]};
@@ -32,6 +34,7 @@ const HOME_SECTIONS=[
     {key:'houseType',label:'屋況',type:'chips',est:true,options:['新成屋','老屋翻新','預售屋']},
     {key:'elevator',label:'電梯',type:'chips',options:['有電梯','無電梯']},
     {key:'area',label:'坪數',type:'number',suffix:'坪',ai:true,est:true,min:0,step:'any'},
+    {key:'areaRange',label:'坪數區間',type:'select',options:AREA_RANGES},
     {key:'completion',label:'交屋／完工月份',type:'month'},
     {key:'layout',label:'格局',type:'layout',est:true,wide:true}]},
   {id:'needs',title:'空間需求',req:true,fields:[
@@ -54,6 +57,7 @@ const SPACE_SECTIONS=[
     {key:'region',label:'縣市',type:'select',options:COUNTIES},
     {key:'address',label:'地址',type:'text'},
     {key:'area',label:'坪數',type:'number',suffix:'坪',ai:true,est:true,min:0,step:'any'},
+    {key:'areaRange',label:'坪數區間',type:'select',options:AREA_RANGES},
     {key:'completion',label:'開幕／展期月份',type:'month'}]},
   {id:'needs',title:'空間需求',req:true,fields:[
     {key:'usage',label:'空間用途',type:'text',ai:true,wide:true,placeholder:'例如：咖啡廳、辦公室、品牌展位'},
@@ -71,8 +75,8 @@ const referenceFields=(type,id)=>id==='visual'?aiFields(type):allFields(type).fi
 const STRATEGY_TEMPLATE='strategy-v1';
 const STRATEGY_KEYS=[['overview','提案概述'],['directions','設計方向'],['budgetTimeline','預算與時程提醒'],['questions','需要向客戶確認的問題'],['nextSteps','下一步']];
 const STRATEGY_FIELDS={
-  home:['region','houseType','elevator','area','completion','layout','style','members','renoType','budget','needsNote'],
-  space:['region','area','completion','usage','style','renoType','budget','needsNote'],
+  home:['region','houseType','elevator','area','areaRange','completion','layout','style','members','renoType','budget','needsNote'],
+  space:['region','area','areaRange','completion','usage','style','renoType','budget','needsNote'],
   general:['background','audience','stylePref','deliverables','budget','needsNote']
 };
 const STRATEGY_INSTRUCTIONS=`你是台灣設計公司的提案顧問，要為內部會議寫一份「策略企劃」草稿。{{typeLanguage}}閱讀「需求資料」後，只根據已提供的事實寫作。
@@ -117,7 +121,7 @@ function strategySnapshot(p){const fields=allFields(p.type);return {type:p.type,
 function maskStrategyText(value){return String(value).replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,'[信箱]').replace(/(?<!\d)09(?:[\s-]*\d){8}(?!\d)/g,'[電話]').replace(/(?<!\d)0\d{1,2}-?\d{6,8}(?!\d)/g,'[電話]');}
 function strategyPrompt(p){
   const snap=strategySnapshot(p),fields=allFields(p.type),language=isSpace(p.type)?'使用空間設計語彙；':'使用該類設計提案語彙，不要套用室內裝修建議。';
-  const data=strategyFields(p.type).map(k=>{const f=fields.find(f=>f.key===k),value=display(f,snap.brief[k]);return `${f.label}：${value?maskStrategyText(value):'未填'}`;}).join('\n');
+  const data=strategyFields(p.type).map(k=>{const f=fields.find(f=>f.key===k),value=f?display(f,snap.brief[k]):'';return `${f?.label||k}：${value?maskStrategyText(value):'未填'}`;}).join('\n');
   return STRATEGY_INSTRUCTIONS.replace('{{typeLanguage}}',language).replace('{{type}}',snap.type).replace('{{data}}',data);
 }
 function parseStrategy(raw){
@@ -190,24 +194,39 @@ function normalizeProject(p){
   if(!p.source||!['manual','meeting','client','unknown'].includes(p.source.kind))p.source={kind:'unknown'};
   if(typeof p.leadId!=='string'||!p.leadId.trim())delete p.leadId;
   if(!p.leadDigest||typeof p.leadDigest!=='object'||Array.isArray(p.leadDigest))delete p.leadDigest;
+  const normalizeStoredSnapshot=snap=>{
+    const normalized=strategySnapshot({type:snap.type||p.type,brief:snap.brief||{}});
+    if(strategyFields(normalized.type).includes('areaRange')){
+      if(snap.brief&&Object.hasOwn(snap.brief,'areaRange'))normalized.brief.areaRange=snap.brief.areaRange;
+      else if(normalized.type===p.type&&!isEmpty(p.brief.areaRange))normalized.brief.areaRange=norm(p.brief.areaRange);
+    }
+    return normalized;
+  };
   for(const name of ['strategy','strategyPrev'])if(p[name]?.snapshot){
-    const snap=p[name].snapshot;p[name].snapshot=strategySnapshot({type:snap.type||p.type,brief:snap.brief||{}});
+    p[name].snapshot=normalizeStoredSnapshot(p[name].snapshot);
   }
-  if(p.strategyPending?.snapshot){const snap=p.strategyPending.snapshot;p.strategyPending.snapshot=strategySnapshot({type:snap.type||p.type,brief:snap.brief||{}});}
+  if(p.strategyPending?.snapshot)p.strategyPending.snapshot=normalizeStoredSnapshot(p.strategyPending.snapshot);
   if(!Array.isArray(p.strategyCompare))p.strategyCompare=[];
   p.strategyCompare=p.strategyCompare.filter(item=>item&&typeof item==='object'&&!Array.isArray(item)).slice(-3).map(item=>({
     at:typeof item.at==='string'?item.at:'',
     source:['ChatGPT','Gemini','Claude','其他'].includes(item.source)?item.source:'其他',
     sections:Object.fromEntries(STRATEGY_KEYS.map(([key])=>[key,typeof item.sections?.[key]==='string'?item.sections[key]:''])),
-    snapshot:strategySnapshot({type:typeof item.snapshot?.type==='string'?item.snapshot.type:p.type,brief:item.snapshot?.brief||{}}),
+    snapshot:normalizeStoredSnapshot({type:typeof item.snapshot?.type==='string'?item.snapshot.type:p.type,brief:item.snapshot?.brief||{}}),
     warnings:Array.isArray(item.warnings)?item.warnings.filter(w=>typeof w==='string'):[],
     instructionAt:typeof item.instructionAt==='string'?item.instructionAt:null,
     oldInstruction:item.oldInstruction===true
   }));
+  const oldRange=type=>type===p.type&&!isEmpty(p.brief.areaRange)?norm(p.brief.areaRange):'';
+  const addOldAreaRange=(record,type,fields)=>{if(fields.includes('areaRange')&&record&&typeof record==='object'&&!Array.isArray(record)&&!Object.hasOwn(record,'areaRange'))record.areaRange=oldRange(type);};
+  const addOldSnapshot=snapshot=>{if(snapshot&&typeof snapshot==='object'&&!Array.isArray(snapshot))addOldAreaRange(snapshot.brief,snapshot.type||p.type,strategyFields(snapshot.type||p.type));};
+  for(const name of ['strategy','strategyPrev','strategyPending'])addOldSnapshot(p[name]?.snapshot);
+  p.strategyCompare.forEach(item=>addOldSnapshot(item.snapshot));
   function migrateBasis(id,basis){
     if(!basis)return basis;
     if(typeof basis!=='object'||Array.isArray(basis))throw Error('完成依據格式無效');
-    if(id==='strategy'&&basis.req&&!basis.req.brief)basis.req=strategySnapshot({type:basis.req.type||p.type,brief:basis.req});
+    if(id==='strategy'&&basis.req&&!basis.req.brief)basis.req=normalizeStoredSnapshot({type:basis.req.type||p.type,brief:basis.req});
+    if(id==='brief')addOldAreaRange(basis.req,basis.req?.type||p.type,allFields(basis.req?.type||p.type).filter(f=>f.req).map(f=>f.key));
+    if(id==='strategy')addOldSnapshot(basis.req);
     if(['strategy','visual','model3d'].includes(id)&&!Object.hasOwn(basis,'sections'))basis.sections=p.strategy?.sections??null;
     if(id==='proposal'&&Array.isArray(basis.parts))basis.parts=basis.parts.map(([step,part])=>[step,migrateBasis(step,part)]);
     return basis;
@@ -250,17 +269,22 @@ function mapLeadToProject(lead){
   const region=area==='嘉義'?'':Object.hasOwn(alias,selectedArea)?alias[selectedArea]:COUNTIES.includes(area)?area:'';
   if(region)brief.region=region;
   else if(area)notes.push(`地區（客人填寫）：${area}`);
-  if(digest.size)needs.push(`坪數（客人勾選）：${digest.size}`);
+  if(digest.size){if(isSpace(type)&&AREA_RANGES.includes(digest.size))brief.areaRange=digest.size;else needs.push(`坪數（客人勾選）：${digest.size}`);}
   if(digest.timeline)needs.push(`預計開始（客人勾選）：${digest.timeline}`);
   const budgetOptions=type==='其他設計'?[]:allFields(type).find(f=>f.key==='budget')?.options||[];
   if(digest.budget){if(budgetOptions.includes(digest.budget))brief.budget=digest.budget;else needs.push(`預算（客人勾選）：${digest.budget}`);}
-  if(digest.contact_time)notes.push(`方便聯絡（客人勾選）：${digest.contact_time}`);
+  if(digest.contact_time){if(CONTACT_TIMES.includes(digest.contact_time))brief.contactTime=[digest.contact_time];else notes.push(`方便聯絡（客人勾選）：${digest.contact_time}`);}
   if(lead.contact_result)notes.push(`建立時聯絡結果：${({contacted:'已聯絡',site_visit:'約丈量',not_interested:'沒興趣',unreachable:'聯絡不上'})[lead.contact_result]||answerText(lead.contact_result)}`);
   if(needs.length)brief.needsNote=needs.join('\n');
   const date=taipeiDate(lead.completed_at),source={kind:'client'};
   if(date)source.submittedAt=lead.completed_at;
   const contact=digest.name||'未留姓名';
-  const name=[contact,area,service].filter(Boolean).join(' ').slice(0,80);
+  const shortArea=region&&!['新竹市','新竹縣','嘉義市','嘉義縣'].includes(region)?region.replace(/[市縣]$/,''):area;
+  const serviceNames={新成屋裝潢:'新成屋',舊屋翻新:'老屋翻新',局部裝修:'局部翻修',商業空間:'商業空間',其他服務:'其他'};
+  const shortService=Object.hasOwn(serviceNames,service)?serviceNames[service]:service;
+  const shortSize=AREA_RANGES.slice(0,5).includes(digest.size)?digest.size:'';
+  const shortDetails=[shortArea,shortService,shortSize].filter(Boolean).join(' ');
+  const name=`${contact}${shortDetails?'｜'+shortDetails:''}`.slice(0,80);
   return {name,date,done:false,contact,phone:digest.phone,email:'',due:'',type,notes:notes.join('\n'),brief,steps:{},skip:{},strategyCompare:[],source,leadId:lead.id,leadDigest:digest};
 }
 function projectsForLead(id){return projects.filter(p=>p&&typeof p==='object'&&p.leadId===String(id)).sort((a,b)=>(Date.parse(b.createdAt)||0)-(Date.parse(a.createdAt)||0));}
@@ -306,7 +330,8 @@ function display(f,v){
   if(f.suffix)return `${v} ${f.suffix}`;
   return String(v);
 }
-function readiness(p){const list=aiFields(p.type);const missing=list.filter(f=>isEmpty(norm(getVal(p,f)))||(f.type==='number'&&!(Number.isFinite(Number(getVal(p,f)))&&Number(getVal(p,f))>0)));return {total:list.length,filled:list.length-missing.length,missing,complete:!missing.length};}
+const hasExactArea=p=>Number.isFinite(Number(p.brief?.area))&&Number(p.brief?.area)>0;
+function readiness(p){const list=aiFields(p.type);const missing=list.filter(f=>f.key==='area'&&isSpace(p.type)?!hasExactArea(p)&&!AREA_RANGES.slice(0,5).includes(p.brief?.areaRange):isEmpty(norm(getVal(p,f)))||(f.type==='number'&&!(Number.isFinite(Number(getVal(p,f)))&&Number(getVal(p,f))>0))).map(f=>f.key==='area'?{...f,label:'坪數或坪數區間'}:f);return {total:list.length,filled:list.length-missing.length,missing,complete:!missing.length};}
 const strategyOutdated=p=>!!p.strategy&&!equal(strategySnapshot({type:p.strategy.snapshot?.type||p.type,brief:p.strategy.snapshot?.brief||{}}),strategySnapshot(p));
 function stepStatus(p,id){
   if(id==='model3d'&&!modelSupported(p))return {s:'na',meta:'本版不提供'};
@@ -406,6 +431,7 @@ function missingList(r){return r.missing.map(f=>`<button class="link-chip" data-
 function statusHtml(p,id){
   const st=stepStatus(p,id),r=readiness(p),blocks=completionBlocks(p,id),disabled=blocks.length?'disabled':'';
   let title=st.s==='stale'?'需要更新':stateLabel[st.s],reason=st.s==='stale'?staleReason(p,id):st.meta,buttons='',extra='';
+  if(id==='brief'&&!r.complete&&p.brief?.areaRange==='尚未確定'&&!hasExactArea(p))reason='坪數區間為尚未確定，請改選或填精確坪數';
   if(st.s==='na')reason=id==='model3d'&&!modelSupported(p)?`『${p.type}』本版未提供 3D 建模。`:'本案不採用此步驟，提案不會引用。';
   else{
     if(st.s==='done')buttons=`<button data-action="uncomplete">${id==='brief'?'取消確認':'取消完成'}</button>`;
@@ -423,7 +449,8 @@ function statusHtml(p,id){
 function stepBody(p){if(view.step==='brief')return briefBody(p);if(view.step==='strategy')return strategyBody(p);if(view.step==='estimate')return estimateBody(p);if(view.step==='proposal')return proposalBody(p);return placeholderBody(p,view.step);}
 function briefBody(p){
   const cards=sectionsFor(p.type).map(s=>`<section class="card"><div class="card-head"><h2>${s.title}</h2><button class="btn-icon" data-edit-section="${s.id}">${icon('edit')}編輯</button></div><div class="kv">${s.fields.map(f=>{const v=display(f,getVal(p,f));return `<button class="kv-item${f.wide?' wide':''}" data-edit-field="${f.key}" title="點一下編輯"><span class="kv-label">${esc(f.label)}${aiBadge(f)}</span><span class="kv-value${v?'':' is-empty'}">${v?esc(v):'未填'}</span></button>`;}).join('')}</div></section>`).join('');
-  return `${sourceBody(p)}${p.leadId?'<p class="hint">客人之後改表單，這裡不會自動更新</p>':''}<p class="hint">小提示：點任何欄位，就會打開完整表單並跳到那一格。填好後請按「確認需求」。</p>${cards}`;
+  const oldRangeNote=isSpace(p.type)&&!hasExactArea(p)&&!AREA_RANGES.slice(0,5).includes(p.brief?.areaRange)&&String(p.brief?.needsNote||'').includes('坪數（客人勾選）：')?'<p class="hint">其他需求裡的區間不會算進新欄位，請在坪數區間重選一次</p>':'';
+  return `${sourceBody(p)}${p.leadId?'<p class="hint">客人之後改表單，這裡不會自動更新</p>':''}${oldRangeNote}<p class="hint">小提示：點任何欄位，就會打開完整表單並跳到那一格。填好後請按「確認需求」。</p>${cards}`;
 }
 function sourceBody(p){
   const s=p.source;
@@ -433,12 +460,12 @@ function sourceBody(p){
     if(p.brief.houseType)written.push('屋況');
     if(p.brief.renoType)written.push('裝修類型');
     if(p.brief.budget)written.push('預算');
-    const needs=['size','timeline'].filter(k=>digest[k]).map(k=>LEAD_LABELS[k]);
-    if(digest.budget&&!p.brief.budget)needs.push('預算');
-    if(p.type==='其他設計')needs.push('服務');
-    const memo=['來源說明'];if(digest.contact_time)memo.push('方便聯絡');if(digest.area&&!p.brief.region)memo.push('地區');
+    if(p.brief.areaRange)written.push('坪數區間');
+    if(Array.isArray(p.brief.contactTime)&&p.brief.contactTime.length)written.push('方便聯絡');
+    const needs=['size','timeline','budget','service'].filter(k=>String(p.brief.needsNote||'').includes(`${({size:'坪數',timeline:'預計開始',budget:'預算',service:'服務'})[k]}（客人勾選）：`)).map(k=>LEAD_LABELS[k]);
+    const memo=['來源說明'];if(String(p.notes||'').includes('方便聯絡（客人勾選）：'))memo.push('方便聯絡');if(String(p.notes||'').includes('地區（客人填寫）：'))memo.push('地區');
     if(String(p.notes||'').includes('建立時聯絡結果：'))memo.push('建立時聯絡結果');
-    return `<section class="card source-card"><div class="card-head"><h2>需求來源</h2></div><p>來自客戶名單，送出時間 ${s.submittedAt?esc(timeText(s.submittedAt)):'未提供'}</p><p>已寫入欄位：${esc(written.join('、'))}</p><p>寫在其他需求：${esc(needs.join('、')||'無')}</p><p>寫在備註：${esc(memo.join('、'))}</p>${p.type==='其他設計'&&p.brief.region?'<p class="muted">類型改成居家或商業空間後，縣市會出現在欄位裡</p>':''}<p id="lead-update-status" class="lead-update-status" role="status">核對名單中…</p></section>`;
+    return `<section class="card source-card"><div class="card-head"><h2>需求來源</h2></div><p>來自客戶名單，送出時間 ${s.submittedAt?esc(timeText(s.submittedAt)):'未提供'}</p><p>已寫入欄位：${esc(written.join('、'))}</p><p>寫在其他需求：${esc(needs.join('、')||'無')}</p><p>寫在備註：${esc(memo.join('、'))}</p><p class="muted">名稱是建立當下的簡稱，縣市欄位是全名，之後都不會跟著名單改</p>${p.type==='其他設計'&&p.brief.region?'<p class="muted">類型改成居家或商業空間後，縣市會出現在欄位裡</p>':''}<p id="lead-update-status" class="lead-update-status" role="status">核對名單中…</p></section>`;
   }
   let body='<p>手動整理專案需求，填好後再確認需求。</p>';
   if(s.kind==='unknown')body='<p>未註明來源（舊資料），請選擇。</p>';
@@ -504,7 +531,7 @@ function estimateBlocks(p){
   if(!e.scope)reasons.push('報價範圍必填');if(!e.validUntil)reasons.push('有效期限必填');return reasons;
 }
 function totalsHtml(p,estimate){const t=totals(p,estimate);return `<dl class="totals"><div><dt>小計（未稅）</dt><dd>NT$ ${esc(money(t.subtotal))}</dd></div><div><dt>營業稅（5%）</dt><dd>NT$ ${esc(money(t.tax))}</dd></div><div class="grand-total"><dt>總計</dt><dd>NT$ ${esc(money(t.total))}</dd></div><div><dt>客戶預算</dt><dd>${esc(p.brief.budget||'未填')}</dd></div></dl>`;}
-function areaLinkHtml(r){return r.areaLink?`<span class="muted small">${r.areaLink==='on'?'沿用需求坪數':'自訂計價坪數'}</span>${r.areaLink==='off'?'<button type="button" data-est-link>改回沿用</button>':''}`:'';}
+function areaLinkHtml(r){const p=findProject(view.id);return r.areaLink?`<span class="muted small">${r.areaLink==='on'?'沿用需求坪數':'自訂計價坪數'}</span>${r.areaLink==='on'&&p&&!hasExactArea(p)?`<span class="muted small">需求沒有精確坪數，數量是 0。目前只有區間：${esc(p.brief.areaRange||'未填')}。填了精確坪數才會帶入。</span>`:''}${r.areaLink==='off'?'<button type="button" data-est-link>改回沿用</button>':''}`:'';}
 function estimateBody(p){
   const e=resolvedEstimate(p),input=(key,v,i,type='text')=>`<input data-est-field="${key}" type="${type}" value="${esc(v)}" aria-label="第 ${i+1} 列${{item:'項目',qty:'數量',unit:'單位',price:'單價'}[key]}" ${type==='number'?'min="0" step="any" inputmode="decimal"':''}>`;
   return `<section class="card estimate-card"><div class="card-head"><h2>報價明細</h2></div><form id="estimate-form"><div class="estimate-scroll" role="region" aria-label="報價明細，可左右捲動" tabindex="0"><table class="estimate-table"><thead><tr><th>項目</th><th>數量</th><th>單位</th><th>單價</th><th>小計</th><th>操作</th></tr></thead><tbody>${e.rows.map((r,i)=>`<tr data-est-id="${esc(r.id)}"><td>${input('item',r.item,i)}</td><td>${input('qty',r.qty||'',i,'number')}<div class="area-link">${areaLinkHtml(r)}</div></td><td>${input('unit',r.unit,i)}</td><td>${input('price',r.price||'',i,'number')}</td><td class="row-subtotal">${esc(money(r.qty*r.price))}</td><td><button type="button" data-est-delete aria-label="刪除第 ${i+1} 列">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div><button type="button" data-action="est-add">＋ 新增一列</button><div class="form-grid estimate-conditions"><label>稅別<select data-est-condition="tax"><option value="excl" ${e.tax==='excl'?'selected':''}>未稅（另加 5% 營業稅）</option><option value="incl" ${e.tax==='incl'?'selected':''}>含稅</option></select></label><label>有效期限<input type="date" data-est-condition="validUntil" value="${esc(e.validUntil)}"></label><label class="wide">報價範圍與說明<textarea data-est-condition="scope" rows="3">${esc(e.scope)}</textarea></label></div></form><div id="estimate-totals" aria-live="polite">${totalsHtml(p,e)}</div></section>`;
@@ -540,10 +567,10 @@ let drawerId=null,drawerType=null,drawerDraft=null,dirty=false;
 function fieldHtml(f,v){
   const id=`f-${f.key}`,wide=f.wide?' wide':'';
   const label=`<span class="field-label">${esc(f.label)}${f.required?' <span class="req" aria-hidden="true">*</span>':''}${aiBadge(f)}</span>`;
-  if(f.type==='chips'){const vals=Array.isArray(v)?v:(v?[v]:[]);return `<fieldset class="field${wide}"><legend>${label}${f.multi?'<span class="muted small">可複選</span>':''}</legend><div class="chips">${[...new Set([...f.options,...vals])].map(o=>`<label class="chip"><input type="${f.multi?'checkbox':'radio'}" name="${f.key}" value="${esc(o)}" ${vals.includes(o)?'checked':''}><span>${esc(o)}</span></label>`).join('')}</div></fieldset>`;}
+  if(f.type==='chips'){const vals=Array.isArray(v)?v:(v?[v]:[]);return `<fieldset class="field${wide}"><legend>${label}${f.multi?'<span class="muted small">可複選</span>':''}</legend><div class="chips">${[...new Set([...f.options,...vals])].map(o=>`<label class="chip"><input type="${f.multi?'checkbox':'radio'}" name="${f.key}" value="${esc(o)}" ${vals.includes(o)?'checked':''}><span>${esc(o)}</span></label>`).join('')}</div>${f.hint?`<p class="muted small">${esc(f.hint)}</p>`:''}</fieldset>`;}
   if(f.type==='layout'){const o=v||{};return `<fieldset class="field${wide}"><legend>${label}</legend><div class="layout-row">${[['r','房'],['l','廳'],['b','衛']].map(([k,u])=>`<label class="suffix-input small-num"><input type="number" min="0" max="20" name="${f.key}.${k}" value="${esc(o[k]??'')}" inputmode="numeric" aria-label="${u}"><span>${u}</span></label>`).join('')}</div></fieldset>`;}
   let control;
-  if(f.type==='select')control=`<select id="${id}" name="${f.key}">${f.noEmpty?'':'<option value="">請選擇</option>'}${[...new Set([...f.options,...(isEmpty(v)?[]:[v])])].map(o=>`<option ${o===v?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+  if(f.type==='select')control=`<select id="${id}" name="${f.key}"${f.key==='areaRange'?' style="min-height:44px"':''}>${f.noEmpty?'':'<option value="">請選擇</option>'}${[...new Set([...f.options,...(isEmpty(v)?[]:[v])])].map(o=>`<option ${o===v?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
   else if(f.type==='textarea')control=`<textarea id="${id}" name="${f.key}" rows="3" maxlength="5000" placeholder="${esc(f.placeholder||'')}">${esc(v||'')}</textarea>`;
   else{const t=f.type==='tel'?'tel':f.type;control=`<input id="${id}" name="${f.key}" type="${t}" value="${esc(v??'')}" ${f.required?'required':''} ${f.placeholder?`placeholder="${esc(f.placeholder)}"`:''} ${f.min!=null?`min="${f.min}"`:''} ${f.step?`step="${f.step}"`:''} ${f.type==='tel'?'inputmode="tel"':''} ${f.type==='number'?'inputmode="decimal"':''} maxlength="150">`;if(f.suffix)control=`<span class="suffix-input">${control}<span>${f.suffix}</span></span>`;}
   return `<div class="field${wide}"><label for="${id}">${label}</label>${control}</div>`;
@@ -563,6 +590,13 @@ function readForm(){
     else if(f.type==='layout'){v={};for(const k of ['r','l','b']){const n=form.elements[`${f.key}.${k}`].value;v[k]=n===''?'':Number(n);}if(isEmpty(v))v='';}
     else v=(form.elements[f.key]?.value??'').trim();
     (f.top?top:brief)[f.key]=v;
+  }
+  if(form.elements.areaRange){
+    const original=drawerDraft.brief?.areaRange;
+    if(form.elements.areaRange.value===String(isEmpty(original)?'':original)){
+      if(Object.hasOwn(drawerDraft.brief,'areaRange'))brief.areaRange=original;
+      else delete brief.areaRange;
+    }
   }
   return {top,brief};
 }

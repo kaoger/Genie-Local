@@ -82,7 +82,7 @@ test('指令使用明確白名單、遮罩與類型用語；複製時保存待�
     await expect(page.locator('#info-dialog')).not.toBeVisible();
     const p = (await storedProjects(page))[0];
     expect(p.strategyPending.template).toBe('strategy-v1');
-    expect(Object.keys(p.strategyPending.snapshot.brief).sort()).toEqual((type === '居家裝潢設計' ? ['region','houseType','elevator','area','completion','layout','style','members','renoType','budget','needsNote'] : type === '商業空間設計' ? ['region','area','completion','usage','style','renoType','budget','needsNote'] : ['background','audience','stylePref','deliverables','budget','needsNote']).sort());
+    expect(Object.keys(p.strategyPending.snapshot.brief).sort()).toEqual((type === '居家裝潢設計' ? ['region','houseType','elevator','area','areaRange','completion','layout','style','members','renoType','budget','needsNote'] : type === '商業空間設計' ? ['region','area','areaRange','completion','usage','style','renoType','budget','needsNote'] : ['background','audience','stylePref','deliverables','budget','needsNote']).sort());
     expect(p.strategyPending.snapshot.brief).not.toHaveProperty('address');
     await page.getByRole('link', { name: '潛在客戶', exact: true }).click();
   }

@@ -64,7 +64,7 @@ async function saveEditor(page) {
 async function fillRequired(page, { type = '居家裝潢設計', area = '35' } = {}) {
   await openEditor(page);
   const form = page.locator('#drawer-form');
-  if (type === '品牌設計') {
+  if (['品牌設計', '其他設計'].includes(type)) {
     await form.locator('[name="background"]').fill('測試品牌識別專案');
     await form.locator('[name="audience"]').fill('一般消費者');
     await form.locator('[name="stylePref"]').fill('簡潔黑白');
@@ -119,12 +119,12 @@ async function completeAllSteps(page, { type = '居家裝潢設計', skipVisual 
     await goStep(page, 'visual');
     await page.getByRole('button', { name: '本案不採用', exact: true }).click();
   } else await markComplete(page, 'visual');
-  if (type !== '品牌設計') await markComplete(page, 'model3d');
+  if (!['品牌設計', '包裝設計', '網站設計'].includes(type)) await markComplete(page, 'model3d');
   await fillEstimate(page);
   await markComplete(page, 'estimate');
   await markComplete(page, 'proposal');
   await expectSteps(page, Object.fromEntries(STEPS.map(id => [id,
-    id === 'model3d' && type === '品牌設計' ? '本版不提供' :
+    id === 'model3d' && ['品牌設計', '包裝設計', '網站設計'].includes(type) ? '本版不提供' :
       id === 'visual' && skipVisual ? '本案不採用' : '已完成'])));
 }
 

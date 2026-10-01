@@ -60,7 +60,7 @@ test('驗收 10：坪數為 0 時只有必填 3/4，不能確認需求', async (
   await createProject(page);
   await fillRequired(page, { area: '0' });
   await expect(stepMeta(page, 'brief')).toHaveText('必填 3/4');
-  await expect(page.locator('#status-slot .status-reason')).toHaveText('還缺必填欄位：坪數');
+  await expect(page.locator('#status-slot .status-reason')).toHaveText('還缺必填欄位：坪數或坪數區間');
   await expect(page.locator('#status-slot [data-action="complete"]')).toBeDisabled();
   await editFields(page, { area: '35' });
   await expect(stepMeta(page, 'brief')).toHaveText('可以確認');
