@@ -4,8 +4,10 @@
 const { supabaseUrl, supabasePublishableKey } = window.GENIE_CONFIG;
 const safeFetch = (input, init = {}) => {
   const headers = new Headers(init.headers);
+  const keepalive = headers.get('x-genie-keepalive') === '1';
+  headers.delete('x-genie-keepalive');
   if (headers.get('Authorization') === `Bearer ${supabasePublishableKey}`) headers.delete('Authorization');
-  return fetch(input, { ...init, headers });
+  return fetch(input, { ...init, headers, ...(keepalive ? { keepalive: true } : {}) });
 };
 const client = window.supabase.createClient(supabaseUrl, supabasePublishableKey, {
   auth: { detectSessionInUrl: false }, global: { fetch: safeFetch },
@@ -13,7 +15,7 @@ const client = window.supabase.createClient(supabaseUrl, supabasePublishableKey,
 const verifiedKey = 'genie-verified-member-ids';
 const listeners = new Set();
 let state = { status: 'checking', displayName: '', email: '', userId: '', localAccess: false };
-let generation = 0, denied = false, pending = null, currentSession = null;
+let generation = 0, denied = false, pending = null, currentSession = null, refreshing = null, memberRefreshing = false;
 const getState = () => ({ ...state });
 function setState(status, displayName = '', email = '', userId = '', localAccess = false) {
   state = { status, displayName, email, userId, localAccess };
@@ -53,7 +55,7 @@ async function denyMember(uid) {
   await client.auth.signOut({ scope: 'local' });
   return { error: '此帳號沒有權限，請聯絡管理者' };
 }
-async function checkMember(session) {
+async function checkMember(session, retried = false) {
   const uid = session?.user?.id;
   if (!uid) { currentSession = null; setState('signedOut'); return { error: null }; }
   currentSession = session;
@@ -71,8 +73,11 @@ async function checkMember(session) {
       if (current !== generation) return { error: null };
       if (error) {
         if (status === 401) {
-          await signOut();
-          return { error: '登入已失效，請重新登入' };
+          if (retried) { setOffline(session); return { error: '無法確認登入，請稍後再試' }; }
+          memberRefreshing = true;
+          try { const renewed = await refresh(); pending = null; return await checkMember(renewed, true); }
+          catch { if (current === generation) setOffline(session); return { error: '無法連線，請稍後再試' }; }
+          finally { memberRefreshing = false; }
         }
         if (status >= 400 && status < 500) return denyMember(uid);
         setOffline(session);
@@ -100,12 +105,36 @@ async function signIn(email, password) {
     return await checkMember(data.session);
   } catch { return { error: '無法連線，請稍後再試' }; }
 }
-async function signOut() {
+async function expire() {
   denied = false;
   currentSession = null;
   ++generation;
   setState('signedOut');
   await client.auth.signOut({ scope: 'local' });
+}
+async function refresh() {
+  if (refreshing) return refreshing;
+  const current = generation;
+  refreshing = (async () => {
+    const { data, error } = await client.auth.refreshSession();
+    if (error || !data?.session) {
+      if (error?.status >= 400 && error.status < 500 && ![408,429].includes(error.status)) {
+        if (current === generation) await expire();
+      }
+      throw Error('續期失敗');
+    }
+    return data.session;
+  })();
+  try { return await refreshing; } finally { refreshing = null; }
+}
+async function signOut({ exported = false } = {}) {
+  if (window.GenieSync && (state.status === 'member' || state.status === 'offline')) {
+    const count = exported ? 0 : await window.GenieSync.prepareSignOut();
+    if (count) return { pending: count };
+    try { window.GenieSync.clear(); } catch { return { error: '這台裝置無法清除快取，請確認瀏覽器儲存權限' }; }
+  }
+  await expire();
+  return { pending: 0 };
 }
 function retry() {
   if (state.status !== 'offline' || !currentSession) return;
@@ -118,9 +147,10 @@ client.auth.onAuthStateChange((event, session) => {
     setState(denied ? 'denied' : 'signedOut');
     return;
   }
+  if (memberRefreshing) return;
   queueMicrotask(() => { checkMember(session); });
 });
 window.addEventListener('online', retry);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) retry(); });
-window.GenieAuth = { getState, subscribe, signIn, signOut, retry, getClient: () => client };
+window.GenieAuth = { getState, subscribe, signIn, signOut, retry, refresh, expire, recheck:()=>currentSession?checkMember(currentSession):null, getClient: () => client };
 })();

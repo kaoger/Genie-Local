@@ -1,5 +1,6 @@
 'use strict';
 const { test: base, expect } = require('@playwright/test');
+const {createCloud,cloudRoute}=require('./mock-cloud');
 const { USER, session } = require('./mock-auth');
 const { projectItems } = require('./helpers');
 
@@ -10,13 +11,15 @@ const VERIFIED_KEY = 'genie-verified-member-ids';
 const OTHER_UID = '00000000-0000-4000-8000-000000000002';
 const test = base.extend({
   api: [async ({ page }, use) => {
+    const cloud=createCloud();
     const api = { password: 'correct', member: { display_name: '測試成員', active: true },
-      memberMode: 'ok', requests: [], memberRequests: 0, refreshes: 0, release: null };
+      memberMode: 'ok', refreshMode: 'ok', requests: [], memberRequests: 0, refreshes: 0, release: null };
     await page.route('https://llqwzrgzekalwdnetvyb.supabase.co/**', async route => {
       const request = route.request(), url = new URL(request.url());
       api.requests.push({ path: url.pathname, search: url.search, method: request.method(), headers: request.headers() });
       const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'content-type': 'application/json' };
       if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      if (url.pathname === '/rest/v1/genie_projects' || /\/rpc\/genie_(save|delete|restore)_project$/.test(url.pathname)) return cloudRoute(route,cloud,headers);
       if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'password') {
         const valid = request.postDataJSON().password === api.password;
         return route.fulfill({ status: valid ? 200 : 400, headers, body: JSON.stringify(valid ? session() :
@@ -24,6 +27,7 @@ const test = base.extend({
       }
       if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'refresh_token') {
         api.refreshes++;
+        if (api.refreshMode === 'invalid') return route.fulfill({status:400,headers,body:'{"error":"invalid_grant","error_description":"Refresh token expired"}'});
         return route.fulfill({ status: 200, headers, body: JSON.stringify(session()) });
       }
       if (url.pathname === '/rest/v1/app_admins') {
@@ -145,7 +149,7 @@ test('非成員與停用成員登出並顯示拒絕畫面', async ({ page, api }
   await expect(page.locator('#auth-shell')).toContainText('此帳號沒有權限，請聯絡管理者');
 });
 
-test('登出關閉對話框、清 toast 與畫面，本機資料和記住信箱保留', async ({ page }) => {
+test('登出關閉對話框、清 toast 與畫面，清除專案快取、保留記住信箱', async ({ page }) => {
   await page.goto('/');
   await login(page);
   await expect(projectItems(page)).toHaveCount(8);
@@ -163,7 +167,9 @@ test('登出關閉對話框、清 toast 與畫面，本機資料和記住信箱�
   await expect(projectItems(page)).toHaveCount(0);
   await expect(page.locator('#project-cards')).toBeEmpty();
   await expect(page).toHaveTitle('登入 Genie-Local');
-  expect(await page.evaluate(key => localStorage.getItem(key), PROJECT_KEY)).toBe(keyBefore);
+  expect(keyBefore).not.toBeNull();
+  expect(await page.evaluate(key => localStorage.getItem(key), PROJECT_KEY)).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('genie-sync-v1'))).toBeNull();
   expect(await page.evaluate(() => localStorage.getItem('genie-last-email'))).toBe(USER.email);
 });
 
@@ -240,6 +246,7 @@ test('停用 A 只移除 A 的曾確認紀錄，再登入遇 5xx 不放行', asy
 for (const [mode, expected] of [['unauthorized', '登入 Genie-Local'], ['forbidden', '此帳號沒有權限，請聯絡管理者']]) {
   test(`成員查詢 ${mode} 登出並顯示${expected}`, async ({ page, api }) => {
     api.memberMode = mode;
+    if(mode==='unauthorized')api.refreshMode='invalid';
     await page.addInitScript(({ key, ids, tokenKey, value }) => {
       localStorage.setItem(key, JSON.stringify(ids));
       localStorage.setItem(tokenKey, JSON.stringify(value));

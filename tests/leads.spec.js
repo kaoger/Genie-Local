@@ -1,5 +1,6 @@
 'use strict';
 const { test: base, expect } = require('@playwright/test');
+const {createCloud,cloudRoute}=require('./mock-cloud');
 
 const SELECT = 'id,status,answers,customer_name,phone,project_type,location,interior_area,budget_range,start_time,completed_at,contact_result,contact_result_at,contact_first_at,contact_undo_until,lead_grade,notification_status,messenger_user_id';
 const email = 'member@example.test';
@@ -9,11 +10,13 @@ const lead = (id, extra = {}) => ({ id, status: 'complete', answers: { contact_t
 
 const test = base.extend({
   api: [async ({ page }, use) => {
+    const cloud=createCloud();
     const api = { rows: [], requests: [], patches: [], rpcs: [], rpcResult: 'undone', rpcUnauthorized: false, fail: false, patchStatus: 200, unauthorized: false, refreshes: 0, refreshFails: false, holdReads: false, readWaiters: [], invalidCount: false };
     await page.route('https://llqwzrgzekalwdnetvyb.supabase.co/**', async route => {
       const request = route.request(), url = new URL(request.url());
       const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'content-type': 'application/json' };
       if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      if (url.pathname === '/rest/v1/genie_projects' || /\/rpc\/genie_(save|delete|restore)_project$/.test(url.pathname)) return cloudRoute(route,cloud,headers);
       if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'password') return route.fulfill({ status: 200, headers, body: JSON.stringify(session()) });
       if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'refresh_token') {
         api.refreshes++;
@@ -306,6 +309,7 @@ test('JWT 失效續期仍失敗時回到登入畫面', async ({ page, api }) => 
   await login(page);
   await expect(page.locator('#leads-list')).toContainText('目前沒有待聯絡的客戶');
   api.unauthorized = true;
+  api.refreshFails = true;
   await page.evaluate(() => window.GenieLeads.refresh());
   await expect(page.locator('#leads-login')).toBeVisible();
   expect(api.refreshes).toBeGreaterThan(0);
@@ -388,6 +392,7 @@ test('寫入時 401 續期後重試，仍失敗則返回登入', async ({ page, 
   expect(api.patches).toHaveLength(2);
   expect(api.refreshes).toBeGreaterThan(0);
   api.unauthorized = true;
+  api.refreshFails = true;
   await showContacted(page);
   await page.locator('[data-lead-id="retry"]').getByRole('button', { name: '約丈量' }).click();
   await expect(page.locator('#leads-login')).toBeVisible();

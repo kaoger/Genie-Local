@@ -219,7 +219,7 @@ test('待聯絡及已回報卡片都有建立按鈕，備註保留建立時聯�
   expect(api.rows[1].contact_result).toBe('site_visit');
 });
 
-test('連點只建一筆；已建立時開啟，多筆開最新', async ({ page, api }) => {
+test('連點只建一筆；已修改的同名單舊副本保留，開啟最近的專案', async ({ page, api }) => {
   api.rows = [row('repeat')];
   const card = await leads(page, 'repeat');
   await card.locator('[data-lead-project]').evaluate(button => { button.click(); button.click(); });
@@ -227,13 +227,16 @@ test('連點只建一筆；已建立時開啟，多筆開最新', async ({ page,
   let projects = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), KEY);
   expect(projects.filter(p => p.leadId === 'repeat')).toHaveLength(1);
   const latest = projects[0];
-  await page.evaluate(({ key, latest }) => { const items = JSON.parse(localStorage.getItem(key)); items.push({ ...latest, id: 'older', createdAt: '2026-01-01T00:00:00Z' }); localStorage.setItem(key, JSON.stringify(items)); }, { key: KEY, latest });
+  await page.evaluate(({ key, latest }) => { const items = JSON.parse(localStorage.getItem(key)); items.push({ ...latest, id: 'older', createdAt: '2026-01-01T00:00:00Z', notes: '既有副本的編輯' }); localStorage.setItem(key, JSON.stringify(items)); }, { key: KEY, latest });
   await page.reload();
   const again = await leads(page, 'repeat');
   await expect(again.locator('[data-lead-project]')).toHaveText('開啟專案');
   await again.locator('[data-lead-project]').click();
   await expect(page).toHaveURL(new RegExp(`/#/p/${latest.id}/brief$`));
   await expect(page.locator('#toast-text')).toHaveText('這位客人有兩筆專案，開啟最近的');
+  projects=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),KEY);
+  expect(projects.filter(p=>p.leadId==='repeat')).toHaveLength(2);
+  expect(projects.find(p=>p.id==='older').notes).toBe('既有副本的編輯');
 });
 
 test('儲存失敗與讀取失敗都留在名單', async ({ page, api }) => {

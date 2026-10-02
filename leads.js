@@ -56,7 +56,7 @@ async function fetchLead(id) {
   const run = () => client.from('customer_leads').select(columns).eq('id', id).eq('status', 'complete').maybeSingle();
   let response = await run();
   if (response.status === 401) {
-    const refreshed = await client.auth.refreshSession();
+    const refreshed = await window.GenieAuth.refresh().then(session=>({data:{session}})).catch(()=>({error:true}));
     if (refreshed.error || !refreshed.data?.session) throw Error('名單驗證失敗');
     response = await run();
   }
@@ -97,7 +97,7 @@ function card(lead, kind) {
     <div class="lead-card-top"><h3>${esc(valueText(lead.customer_name))}</h3><div class="lead-tags">${grade}${overdue ? '<span class="lead-tag lead-alert">超過 3 天未聯絡</span>' : ''}${lead.notification_status === 'failed' ? '<span class="lead-tag lead-alert">通知信寄送失敗</span>' : ''}</div></div>
     <dl class="lead-fields">${field('服務', lead.project_type)}${field('地區', lead.location)}${field('坪數', lead.interior_area)}${field('預算', lead.budget_range)}${field('開始時間', lead.start_time)}${field('方便聯絡時段', contactTime)}<div><dt>姓名</dt><dd>${esc(valueText(lead.customer_name))}</dd></div><div><dt>電話</dt><dd>${phoneHtml}</dd></div><div><dt>送出時間</dt><dd>${timeHtml(lead.completed_at)}</dd></div>${kind === 'contacted' ? `<div><dt>聯絡結果</dt><dd>${esc(results[lead.contact_result] || valueText(lead.contact_result))}</dd></div><div><dt>結果時間</dt><dd>${timeHtml(lead.contact_result_at)}</dd></div>` : ''}</dl>
     <div class="lead-actions"><div class="lead-results" role="group" aria-label="聯絡結果">${resultButtons}</div>${minutes ? `<div class="lead-undo-wrap"><button type="button" class="lead-undo" data-lead-undo ${saving.has(String(lead.id)) ? 'disabled' : ''}>收回，改回待聯絡</button><span class="lead-undo-time">還可收回 ${minutes} 分鐘</span></div>` : ''}${messenger ? '<button type="button" class="lead-messenger" data-lead-messenger>💬 Messenger</button>' : ''}</div>
-    <div class="lead-project-action"><button type="button" class="lead-project-button" data-lead-project ${createDisabled ? 'disabled' : ''}>${creating.has(String(lead.id)) ? '建立中…' : existing ? '開啟專案' : '帶入名單建立專案'}</button><span>只存在這台瀏覽器</span></div>
+    <div class="lead-project-action"><button type="button" class="lead-project-button" data-lead-project ${createDisabled ? 'disabled' : ''}>${creating.has(String(lead.id)) ? '建立中…' : existing ? '開啟專案' : '帶入名單建立專案'}</button><span>儲存後同步到雲端</span></div>
   </article>`;
 }
 function render(kind) {
@@ -117,15 +117,13 @@ async function query(kind, offset, filter = selectedFilter, head = false) {
   };
   let response = await run();
   if (response.status === 401) {
-    const refreshed = await client.auth.refreshSession();
+    const refreshed = await window.GenieAuth.refresh().then(session=>({data:{session}})).catch(()=>({error:true}));
     if (refreshed.error || !refreshed.data?.session) {
-      await window.GenieAuth.signOut();
       return null;
     }
     response = await run();
     if (response.status === 401) {
-      await window.GenieAuth.signOut();
-      return null;
+      return response;
     }
   }
   return response;
@@ -213,10 +211,10 @@ async function saveResult(cardElement, value) {
   try {
     let response = await run();
     if (response.status === 401) {
-      const refreshed = await client.auth.refreshSession();
-      if (refreshed.error || !refreshed.data?.session) { await window.GenieAuth.signOut(); return; }
+      const refreshed = await window.GenieAuth.refresh().then(session=>({data:{session}})).catch(()=>({error:true}));
+      if (refreshed.error || !refreshed.data?.session) { notice('無法連線，請稍後再試'); return; }
       response = await run();
-      if (response.status === 401) { await window.GenieAuth.signOut(); return; }
+      if (response.status === 401) { notice('無法連線，請稍後再試'); return; }
     }
     if (current !== epoch || !active()) return;
     if (response.error) { notice('儲存失敗，請稍後再試'); return; }
@@ -256,10 +254,10 @@ async function undoResult(lead) {
     const run = () => client.rpc('genie_undo_contact_result', { p_id: lead.id, p_expected_result: lead.contact_result, p_expected_at: lead.contact_result_at });
     let response = await run();
     if (response.status === 401) {
-      const refreshed = await client.auth.refreshSession();
-      if (refreshed.error || !refreshed.data?.session) { await window.GenieAuth.signOut(); return; }
+      const refreshed = await window.GenieAuth.refresh().then(session=>({data:{session}})).catch(()=>({error:true}));
+      if (refreshed.error || !refreshed.data?.session) { notice('無法連線，請稍後再試'); return; }
       response = await run();
-      if (response.status === 401) { await window.GenieAuth.signOut(); return; }
+      if (response.status === 401) { notice('無法連線，請稍後再試'); return; }
     }
     if (current !== epoch || !active()) return;
     if (response.error) { notice('收回失敗，請稍後再試'); return; }
@@ -297,6 +295,8 @@ async function createProject(cardElement) {
   button.disabled = true;
   button.textContent = '建立中…';
   try {
+    await window.GenieSync.sync();
+    if (window.GenieProjects.openLeadProject(id)) { notice('這位客人已有專案'); return; }
     const lead = await fetchLead(id);
     if (!active()) { notice('已取消建立（離開了客戶名單）'); return; }
     if (window.GenieProjects.openLeadProject(id)) return;
