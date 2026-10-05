@@ -326,8 +326,8 @@ summary{cursor:pointer;font-weight:600;color:#343b43;overflow-wrap:anywhere}.car
 
 /* ================= 手機底部導覽與更多 ================= */
 @media (max-width:600px), (max-height:500px){
-  :root{--mobile-nav-height:72px;--mobile-bottom-space:calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 16px)}
-  .sidebar{inset:auto 0 0;width:100%;height:calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));padding-bottom:env(safe-area-inset-bottom, 0px);border-right:0;border-top:1px solid #222;overflow:visible}
+  :root{--mobile-nav-height:72px;--mobile-bottom-space:calc(var(--mobile-nav-height) + var(--safe-bottom) + 16px)}
+  .sidebar{inset:auto 0 0;width:100%;height:calc(var(--mobile-nav-height) + var(--safe-bottom));padding-bottom:var(--safe-bottom);border-right:0;border-top:1px solid #222;overflow:visible}
   .sidebar>.avatar,.sidebar-bottom,.nav-actions>[data-action="account"]{display:none}
   .nav-actions{position:static;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:100%;height:100%;margin:0;padding:0;gap:0}
   .nav-actions>button{width:100%;height:100%;min-width:44px;min-height:44px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;padding:4px 0;border-radius:0;color:#080808}
@@ -360,7 +360,7 @@ summary{cursor:pointer;font-weight:600;color:#343b43;overflow-wrap:anywhere}.car
 /* ================= 手機清單頁首與回到頂部 ================= */
 @media (max-width:600px), (max-height:500px){
   :root{--back-to-top-size:44px;--back-to-top-gap:16px}
-  .page-header{position:sticky;top:var(--offline-height, 0px);z-index:5;background:#fff;padding-top:calc(6px + env(safe-area-inset-top, 0px))}
+  .page-header{position:sticky;top:var(--offline-height, 0px);z-index:5;background:#fff;padding-top:calc(6px + var(--header-safe-top))}
   /* main 的 padding 也會偏移 sticky 的參考邊緣，清單改用頁首前的留白。 */
   body:has(.offline-banner:not([hidden])) main:has(>#list-view:not([hidden]),>#leads-view:not([hidden])){padding-top:0}
   body:has(.offline-banner:not([hidden])) .page-header{margin-top:var(--offline-height, 0px)}
@@ -376,3 +376,60 @@ summary{cursor:pointer;font-weight:600;color:#343b43;overflow-wrap:anywhere}.car
 .sync-conflict button{min-height:44px}.sync-notice{margin:0;padding:12px 20px;background:#fff3d6;color:#6b4b16}
 .sync-badge{display:inline-block;margin-left:6px;font-size:11px;color:#8a5b13;background:#fff3d6;padding:2px 6px;border-radius:4px}
 .sync-readonly #sync-readonly{color:#8a5b13}.sync-readonly [data-action="add"],.sync-readonly [data-copy],.sync-readonly [data-delete],.sync-readonly [data-action="delete-selected"],.sync-readonly [data-lead-project],.sync-readonly [data-lead-result],.sync-readonly [data-lead-undo]{opacity:.45;cursor:not-allowed}
+
+/* ================= v8.1：主畫面 App 四向安全區 ================= */
+:root{--safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px);--safe-left:env(safe-area-inset-left,0px);--safe-right:env(safe-area-inset-right,0px);--header-safe-top:var(--safe-top);--page-gutter:32px}
+body:has(.offline-banner:not([hidden])){--header-safe-top:0px}
+.auth-shell{min-height:calc(100dvh - var(--safe-top) - var(--safe-bottom));height:calc(100dvh - var(--safe-top) - var(--safe-bottom));margin-top:var(--safe-top);margin-bottom:var(--safe-bottom);padding:24px calc(24px + var(--safe-right)) 24px calc(24px + var(--safe-left));overflow-y:auto;align-items:safe center;scroll-padding:24px}
+.sidebar{width:calc(73px + var(--safe-left));padding:var(--safe-top) 0 var(--safe-bottom) var(--safe-left)}
+main{margin-left:calc(73px + var(--safe-left))}
+.page-header{height:auto;min-height:calc(52px + var(--header-safe-top));padding-top:calc(12px + var(--header-safe-top));padding-left:calc(var(--page-gutter) + var(--safe-left));padding-right:calc(32px + var(--safe-right))}
+.content,.leads-content,.detail-body{padding-left:calc(var(--page-gutter) + var(--safe-left));padding-right:calc(var(--page-gutter) + var(--safe-right));padding-bottom:calc(24px + var(--safe-bottom))}
+.leads-content{padding-bottom:calc(32px + var(--safe-bottom))}
+.detail-body{padding-bottom:calc(48px + var(--safe-bottom))}
+.detail-header{padding-top:var(--header-safe-top);top:var(--offline-height,0px)}
+.detail-top,.stepper{padding-left:calc(var(--page-gutter) + var(--safe-left));padding-right:calc(var(--page-gutter) + var(--safe-right))}
+.detail-back{display:none}
+.offline-banner{left:calc(73px + var(--safe-left));padding-top:calc(6px + var(--safe-top));padding-right:calc(12px + var(--safe-right))}
+.offline-banner span{min-width:0;overflow-wrap:anywhere}
+/* 橫幅的實際高度由 ResizeObserver 計算；最上層橫幅獨自保留頂部 inset。 */
+body:has(.offline-banner:not([hidden])) main{padding-top:0}
+body:has(.offline-banner:not([hidden])) .page-header,body:has(.offline-banner:not([hidden])) .detail-header{margin-top:var(--offline-height,0px)}
+dialog{inset:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);width:min(560px,calc(100% - 32px - var(--safe-left) - var(--safe-right)));max-height:min(90dvh,calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom)))}
+dialog.drawer{inset:0;margin:0 0 0 auto;width:min(680px,100%);max-height:100dvh}
+.drawer-head{padding-top:calc(20px + var(--safe-top));padding-left:calc(24px + var(--safe-left));padding-right:calc(24px + var(--safe-right));flex-shrink:0}
+.drawer-tabs,.drawer-body,.drawer-foot{padding-left:calc(24px + var(--safe-left));padding-right:calc(24px + var(--safe-right))}
+.drawer-tabs,.drawer-foot{flex-shrink:0}
+.drawer-body{min-height:0}
+.drawer-foot{padding-bottom:calc(14px + var(--safe-bottom))}
+#info-dialog:has(.strategy-dialog-body){width:min(760px,calc(100% - 32px - var(--safe-left) - var(--safe-right)));max-height:min(94dvh,calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom)))}
+#info-dialog[open]:has(.strategy-dialog-body){display:flex;flex-direction:column}
+#info-dialog:has(.strategy-dialog-body) .dialog-heading{flex-shrink:0}
+#info-dialog:has(.strategy-dialog-body) #info-body{min-height:0;max-height:none;overflow-y:auto}
+#toast{bottom:calc(24px + var(--safe-bottom));left:calc(50% + 36px + (var(--safe-left) - var(--safe-right))/2);max-width:calc(100% - 100px - var(--safe-left) - var(--safe-right));max-height:calc(100dvh - 48px - var(--safe-top) - var(--safe-bottom));overflow-y:auto}
+@media(max-width:900px){
+  :root{--page-gutter:24px}
+  .detail-body{padding-bottom:calc(40px + var(--safe-bottom))}
+}
+@media(max-width:600px){
+  :root{--page-gutter:16px}
+  .drawer-head,.drawer-tabs,.drawer-body,.drawer-foot{padding-left:calc(16px + var(--safe-left));padding-right:calc(16px + var(--safe-right))}
+  .drawer-foot{padding-bottom:calc(12px + var(--safe-bottom))}
+  .leads-content{padding-bottom:calc(16px + var(--safe-bottom))}
+}
+@media (max-width:600px), (max-height:500px){
+  :root{--mobile-bottom-space:calc(var(--mobile-nav-height) + var(--safe-bottom) + 16px)}
+  .sidebar{inset:auto 0 0;width:100%;height:calc(var(--mobile-nav-height) + var(--safe-bottom));padding:0 var(--safe-right) var(--safe-bottom) var(--safe-left)}
+  main{margin-left:0}
+  .page-header{padding-top:calc(6px + var(--header-safe-top));padding-left:calc(16px + var(--safe-left));padding-right:calc(16px + var(--safe-right))}
+  .detail-back{display:inline-flex;align-items:center;gap:4px;min-width:44px;min-height:44px;margin-left:calc(12px + var(--safe-left));padding:8px 4px;text-decoration:none;color:#222}
+  .detail-back:hover{background:#e8ebee}
+  .crumbs>a,.crumbs>span{display:none}
+  .offline-banner{left:0;padding-left:calc(12px + var(--safe-left))}
+  .content,.leads-content,.detail-body{padding-bottom:var(--mobile-bottom-space)}
+  .more-menu{right:calc(12px + var(--safe-right));width:min(320px,calc(100% - 24px - var(--safe-left) - var(--safe-right)));max-height:calc(100dvh - var(--mobile-bottom-space) - 12px - var(--safe-top))}
+  #toast{left:calc(50% + (var(--safe-left) - var(--safe-right))/2);bottom:var(--mobile-bottom-space);max-width:calc(100% - 24px - var(--safe-left) - var(--safe-right));max-height:calc(100dvh - var(--mobile-bottom-space) - 12px - var(--safe-top))}
+  #back-to-top{right:calc(16px + var(--safe-right))}
+  #info-dialog:has(.strategy-dialog-body){width:calc(100% - 12px - var(--safe-left) - var(--safe-right));height:calc(100dvh - 12px - var(--safe-top) - var(--safe-bottom));max-height:calc(100dvh - 12px - var(--safe-top) - var(--safe-bottom));padding:16px}
+  #info-dialog:has(.strategy-dialog-body) #info-body{height:auto;flex:1}
+}
