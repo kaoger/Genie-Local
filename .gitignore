@@ -15,3 +15,8 @@ node_modules/
 test-results/
 playwright-report/
 debug.log
+
+# 雲端資料庫備份（敏感資料，絕不提交）
+*.dump
+*.backup
+*.members.csv
