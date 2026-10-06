@@ -64,7 +64,7 @@
 
 4. **手動跑與核對（5–10 分鐘）。** 執行 `/usr/local/lib/genie-backup/backup.sh`，成功只印 `BACKUP_OK`。用 `ls -l /var/lib/genie-backup` 確認一組 `genie-<UTC_TIMESTAMP>.dump`、`.manifest`、`.members.csv`、`latest.manifest`，檔案 0600、目錄 0700。Healthchecks 必須顯示收到 ping。dump 與成員表都是敏感資料；manifest 沒客戶內容但仍私人保存。
 
-   腳本持有唯讀 REPEATABLE READ 快照；dump、表筆數、成員表與 FK／RPC metadata 共用它。並解開 archive 的 `customer_leads` COPY 列數，必須等於快照筆數且大於零；空表直接失敗。sequence 非 MVCC，manifest 取 archive 的 `setval`，不拿稍後的線上值。manifest 是成功組的標記，latest 只在清理完成後發布；半組／暫存檔不應被拉取。
+   腳本持有唯讀 REPEATABLE READ 快照；dump、表筆數、成員表與 FK／RPC metadata 共用它。並解開 archive 的 `customer_leads` COPY 列數，必須等於快照筆數且大於零；空表直接失敗。sequence 非 MVCC，manifest 取 archive 的 `setval`，不拿稍後的線上值。manifest 是成功組的標記；latest 在新組發布後、清理舊組之前更新，拉取端永遠指向存在的一組；半組／暫存檔不應被拉取。
 
    所有資料庫及 Docker 原始錯誤均不進 log，避免錯誤帶出資料列或 webhook secret；失敗訊息只顯示階段。磁碟／dump／archive／metadata／hash／發布失敗不 ping、不進保留清理，未完成發布會撤回本次半組；清理只刪 14 天前、嚴格 timestamp 格式的一組，保留剛成功的一組。任一步失敗均非零退出。清理或 ping 失敗時完整新備份仍保留；清理先於 ping，因此 ping 失敗可能已完成保留清理，Healthchecks 會按缺少心跳告警。
 
