@@ -10,6 +10,17 @@ const sections = {
 };
 const results = { contacted: '已聯絡', site_visit: '約丈量', not_interested: '沒興趣', unreachable: '聯絡不上' };
 const grades = { hot: '🔥 高分', normal: '一般', low: '低' };
+// 連續經過時間；摘要、卡片與伺服器篩選共用同一組門檻。
+const waitLevels = [
+  { id: 'today', label: '當天', icon: '🟢', hours: 24 },
+  { id: 'recent', label: '1–2 天', icon: '🔵', hours: 72 },
+  { id: 'aging', label: '3–4 天', icon: '🟡', hours: 120 },
+  { id: 'old', label: '5 天以上', icon: '🔴', hours: Infinity },
+];
+const hourMs = 3600000, summaryPageSize = 1000;
+let pendingFilter = 'all', pendingNow = Date.now();
+let summary = null, summaryRequest = 0, summaryTimer;
+let authIdentity = '', authStatus = '', identityEpoch = 0;
 let epoch = 0;
 let contactedTotalRequest = 0;
 let lists = {};
@@ -20,14 +31,92 @@ const saving = new Set();
 const creating = new Set();
 let undoTimer;
 
+/* ================= 待聯絡分級（不依賴名單頁 DOM） ================= */
+function canReadSummary() { return window.GenieAuth.getState().status === 'member' && navigator.onLine; }
+function completedTime(value) {
+  const time = value ? Date.parse(value) : NaN;
+  // Postgres 可回傳微秒；Date.parse 會截掉毫秒後的位數，需保留以免跨級。
+  const fraction = typeof value === 'string' ? value.match(/\.(\d+)(?:Z|[+-]\d{2}:?\d{2})$/i)?.[1] : null;
+  return time + (fraction?.length > 3 ? Number(`0.${fraction.slice(3)}`) : 0);
+}
+function waitLevel(value, now) {
+  const time = completedTime(value);
+  if (!Number.isFinite(time)) return null;
+  return waitLevels.find(level => now - time < level.hours * hourMs);
+}
+function renderSummary() {
+  const button = $('[data-action="leads"]'), badge = $('#lead-nav-badge'), description = $('#lead-nav-description');
+  badge.hidden = !summary || summary.total === 0;
+  if (badge.hidden) { badge.innerHTML = ''; badge.className = 'lead-nav-badge'; }
+  button.removeAttribute('aria-describedby');
+  description.innerHTML = '';
+  if (summary?.total) {
+    const worst = waitLevels.slice().reverse().find(level => summary.counts[level.id] > 0);
+    badge.className = `lead-nav-badge wait-${worst?.id || 'unknown'}`;
+    badge.innerHTML = esc(summary.total > 99 ? '99+' : summary.total);
+    description.innerHTML = esc(`待聯絡 ${summary.total} 位，${worst ? `最久 ${worst.label}` : '時間不明'}`);
+    button.setAttribute('aria-describedby', description.id);
+  }
+  const target = root?.querySelector('[data-lead-summary]');
+  if (!target) return;
+  target.hidden = !summary;
+  if (!summary) { target.innerHTML = ''; return; }
+  target.innerHTML = `<strong>${esc(`待聯絡 ${summary.total} 位`)}</strong><div class="lead-wait-filters" role="group" aria-label="待聯絡時間篩選"><button type="button" data-lead-wait="all" aria-pressed="${pendingFilter === 'all'}">${esc('全部')}</button>${waitLevels.map(level => `<button type="button" class="wait-${esc(level.id)}" data-lead-wait="${esc(level.id)}" aria-pressed="${pendingFilter === level.id}">${esc(`${level.icon} ${level.label} ${summary.counts[level.id]}`)}</button>`).join('')}</div>${summary.unknown ? `<small>${esc(`時間不明 ${summary.unknown} 位（已計入待聯絡總數）`)}</small>` : ''}`;
+}
+function clearSummary() {
+  ++summaryRequest;
+  clearTimeout(summaryTimer);
+  summary = null;
+  renderSummary();
+}
+function requestSummary(now) {
+  const current = ++summaryRequest;
+  clearTimeout(summaryTimer);
+  if (!canReadSummary()) { clearSummary(); return; }
+  // 合併成員確認、進頁與同步完成等密集觸發；新觸發立即作廢舊回應。
+  summaryTimer = setTimeout(() => loadSummary(current, now), 80);
+}
+async function loadSummary(current, now) {
+  const uid = window.GenieAuth.getState().userId;
+  const valid = () => current === summaryRequest && canReadSummary() && uid === window.GenieAuth.getState().userId;
+  const next = { total: 0, unknown: 0, counts: Object.fromEntries(waitLevels.map(level => [level.id, 0])), now };
+  try {
+    const client = window.GenieAuth.getClient();
+    for (let offset = 0; valid(); offset += summaryPageSize) {
+      const run = () => client.from('customer_leads').select('id,completed_at').eq('status', 'complete').is('contact_result', null).order('id', { ascending: true }).range(offset, offset + summaryPageSize - 1);
+      let response = await run();
+      if (!valid()) return;
+      if (response.status === 401) {
+        const session = await window.GenieAuth.refresh();
+        if (!session || !valid()) throw Error('名單驗證失敗');
+        response = await run();
+      }
+      if (!valid()) return;
+      if (response.error || !Array.isArray(response.data)) throw Error('待聯絡摘要讀取失敗');
+      for (const row of response.data) {
+        ++next.total;
+        const level = waitLevel(row.completed_at, now);
+        if (level) ++next.counts[level.id]; else ++next.unknown;
+      }
+      if (response.data.length < summaryPageSize) break;
+    }
+    if (!valid()) return;
+    summary = next;
+    totals.pending = next.total;
+    renderSummary(); renderNavigation();
+  } catch {
+    if (valid()) clearSummary();
+  }
+}
+
 function active() {
   const auth = window.GenieAuth.getState();
   return location.hash === '#/leads' && (auth.status === 'member' || (auth.status === 'offline' && auth.localAccess)) && root?.isConnected;
 }
-function relative(value) {
-  const time = Date.parse(value);
+function relative(value, now = Date.now()) {
+  const time = completedTime(value);
   if (!Number.isFinite(time)) return '—';
-  const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  const seconds = Math.max(0, Math.floor((now - time) / 1000));
   if (seconds < 60) return '剛剛';
   if (seconds < 3600) return `${Math.floor(seconds / 60)} 分鐘前`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小時前`;
@@ -83,7 +172,8 @@ function card(lead, kind) {
   const phone = valueText(lead.phone);
   const tel = String(lead.phone ?? '').replace(/[^0-9+\-]/g, '');
   const contactTime = lead.answers && typeof lead.answers === 'object' ? lead.answers.contact_time : null;
-  const overdue = kind === 'pending' && Number.isFinite(Date.parse(lead.completed_at)) && Date.now() - Date.parse(lead.completed_at) > 3 * 86400000;
+  const level = kind === 'pending' ? waitLevel(lead.completed_at, pendingNow) : null;
+  const waitTag = kind === 'pending' ? `<span class="lead-tag wait-${esc(level?.id || 'unknown')}">${esc(level ? `${level.icon} ${relative(lead.completed_at, pendingNow)}` : '時間不明')}</span>` : '';
   const grade = lead.lead_grade ? `<span class="lead-tag grade-${esc(lead.lead_grade)}">${esc(grades[lead.lead_grade] || lead.lead_grade)}</span>` : '';
   const phoneHtml = tel ? `<a href="tel:${esc(tel)}">${esc(phone)}</a>` : esc(phone);
   const messengerId = String(lead.messenger_user_id ?? '');
@@ -94,7 +184,7 @@ function card(lead, kind) {
   const createDisabled = creating.has(String(lead.id)) || (!existing && window.GenieAuth.getState().status !== 'member');
   return `<article class="lead-card" data-lead-id="${esc(lead.id)}">
     ${kind === 'contacted' ? `<strong class="lead-result-heading">${esc(results[lead.contact_result] || valueText(lead.contact_result))}</strong>` : ''}
-    <div class="lead-card-top"><h3>${esc(valueText(lead.customer_name))}</h3><div class="lead-tags">${grade}${overdue ? '<span class="lead-tag lead-alert">超過 3 天未聯絡</span>' : ''}${lead.notification_status === 'failed' ? '<span class="lead-tag lead-alert">通知信寄送失敗</span>' : ''}</div></div>
+    <div class="lead-card-top"><h3>${esc(valueText(lead.customer_name))}</h3><div class="lead-tags">${grade}${waitTag}${lead.notification_status === 'failed' ? '<span class="lead-tag lead-alert">通知信寄送失敗</span>' : ''}</div></div>
     <dl class="lead-fields">${field('服務', lead.project_type)}${field('地區', lead.location)}${field('坪數', lead.interior_area)}${field('預算', lead.budget_range)}${field('開始時間', lead.start_time)}${field('方便聯絡時段', contactTime)}<div><dt>姓名</dt><dd>${esc(valueText(lead.customer_name))}</dd></div><div><dt>電話</dt><dd>${phoneHtml}</dd></div><div><dt>送出時間</dt><dd>${timeHtml(lead.completed_at)}</dd></div>${kind === 'contacted' ? `<div><dt>聯絡結果</dt><dd>${esc(results[lead.contact_result] || valueText(lead.contact_result))}</dd></div><div><dt>結果時間</dt><dd>${timeHtml(lead.contact_result_at)}</dd></div>` : ''}</dl>
     <div class="lead-actions"><div class="lead-results" role="group" aria-label="聯絡結果">${resultButtons}</div>${minutes ? `<div class="lead-undo-wrap"><button type="button" class="lead-undo" data-lead-undo ${saving.has(String(lead.id)) ? 'disabled' : ''}>收回，改回待聯絡</button><span class="lead-undo-time">還可收回 ${minutes} 分鐘</span></div>` : ''}${messenger ? '<button type="button" class="lead-messenger" data-lead-messenger>💬 Messenger</button>' : ''}</div>
     <div class="lead-project-action"><button type="button" class="lead-project-button" data-lead-project ${createDisabled ? 'disabled' : ''}>${creating.has(String(lead.id)) ? '建立中…' : existing ? '開啟專案' : '帶入名單建立專案'}</button><span>儲存後同步到雲端</span></div>
@@ -104,15 +194,21 @@ function render(kind) {
   if (!active()) return;
   const state = lists[kind], target = root.querySelector(`[data-lead-section="${kind}"]`);
   if (!target) return;
-  const empty = kind === 'contacted' && selectedFilter !== 'all' ? '目前篩選沒有資料' : sections[kind].empty;
-  const content = state.items.map((item, index) => { try { return card(item, kind); } catch (error) { console.warn(`第 ${index + 1} 筆名單無法顯示`, error); return '<p class="lead-error" role="alert">一筆名單無法顯示，請重新整理</p>'; } }).join('') || (state.loading ? '<p class="lead-state" role="status">讀取中…</p>' : state.error ? '' : `<p class="lead-state">${empty}</p>`);
+  const empty = kind === 'pending' && pendingFilter !== 'all' ? '這一級目前沒有待聯絡的客人' : kind === 'contacted' && selectedFilter !== 'all' ? '目前篩選沒有資料' : sections[kind].empty;
+  const content = state.items.map((item, index) => { try { return card(item, kind); } catch (error) { console.warn(`第 ${index + 1} 筆名單無法顯示`, error); return '<p class="lead-error" role="alert">一筆名單無法顯示，請重新整理</p>'; } }).join('') || (state.loading ? '<p class="lead-state" role="status">讀取中…</p>' : state.error ? '' : `<p class="lead-state">${esc(empty)}</p>`);
   target.innerHTML = `<div class="lead-cards">${content}</div>${state.error ? '<p class="lead-error" role="alert">讀取失敗，請按重新整理</p>' : ''}${state.more && !state.error ? `<button type="button" class="lead-more" data-lead-more="${kind}" ${state.loading ? 'disabled' : ''}>${state.loading ? '讀取中…' : '載入更多'}</button>` : ''}`;
 }
-async function query(kind, offset, filter = selectedFilter, head = false) {
+async function query(kind, offset, filter = selectedFilter, head = false, wait = pendingFilter, now = pendingNow) {
   const client = window.GenieAuth.getClient(), section = sections[kind];
   const run = () => {
     let request = client.from('customer_leads').select(head ? 'id' : columns, offset === 0 ? { count: 'exact', ...(head ? { head: true } : {}) } : undefined).eq('status', 'complete');
     request = kind === 'pending' ? request.is('contact_result', null) : filter === 'all' ? request.not('contact_result', 'is', null) : request.eq('contact_result', filter);
+    if (kind === 'pending' && wait !== 'all') {
+      const index = waitLevels.findIndex(level => level.id === wait), level = waitLevels[index];
+      // 完成時間越早，經過時間越久；門檻整點歸入較久的一級，無毫秒縫隙。
+      if (Number.isFinite(level.hours)) request = request.gt('completed_at', new Date(now - level.hours * hourMs).toISOString());
+      if (index > 0) request = request.lte('completed_at', new Date(now - waitLevels[index - 1].hours * hourMs).toISOString());
+    }
     return head ? request : request.order(section.order, { ascending: section.ascending }).range(offset, offset + section.size - 1);
   };
   let response = await run();
@@ -129,7 +225,7 @@ async function query(kind, offset, filter = selectedFilter, head = false) {
   return response;
 }
 async function load(kind) {
-  if (!active() || window.GenieAuth.getState().status !== 'member') return;
+  if (!active() || !canReadSummary()) return;
   const state = lists[kind];
   if (state.loading || !state.more) return;
   const current = epoch, offset = state.items.length, filter = selectedFilter;
@@ -145,7 +241,7 @@ async function load(kind) {
     if (offset === 0) {
       const count = Number.isFinite(response.count) ? response.count : null;
       state.total = count;
-      if (kind === 'pending') totals.pending = count;
+      if (kind === 'pending' && pendingFilter === 'all') totals.pending = summary ? summary.total : count;
       if (kind === 'contacted') filteredCount = count;
       renderNavigation();
     }
@@ -167,15 +263,18 @@ async function loadContactedTotal() {
   } catch {} // 讀取失敗時保留上一次有效總數。
 }
 function refresh() {
+  pendingNow = Date.now();
+  requestSummary(pendingNow);
   if (!active()) return;
   ++epoch;
   lists = Object.fromEntries(Object.keys(sections).map(kind => [kind, { items: [], more: true, loading: false, error: false }]));
   renderNavigation();
-  if (window.GenieAuth.getState().status === 'offline') { showOffline(); return; }
+  if (!canReadSummary()) { showOffline(); return; }
   Object.keys(sections).forEach(kind => { render(kind); load(kind); });
   loadContactedTotal();
 }
 function showOffline() {
+  clearSummary();
   if (!active()) return;
   ++epoch; ++contactedTotalRequest;
   totals = { pending: null, contacted: null }; filteredCount = null;
@@ -187,6 +286,7 @@ function activate() {
   root = $('#leads-list');
   if (root) {
     renderNavigation();
+    renderSummary();
     refresh();
     clearInterval(undoTimer);
     undoTimer = setInterval(() => { if (active()) render('contacted'); }, 30000);
@@ -202,6 +302,7 @@ async function saveResult(cardElement, value) {
   if (!before) { saving.delete(id); return; }
   cardElement.querySelectorAll('[data-lead-result],[data-lead-undo]').forEach(button => { button.disabled = true; });
   const current = epoch;
+  const identity = identityEpoch;
   const client = window.GenieAuth.getClient();
   const run = () => {
     let request = client.from('customer_leads').update({ contact_result: value }).eq('id', id);
@@ -216,11 +317,13 @@ async function saveResult(cardElement, value) {
       response = await run();
       if (response.status === 401) { notice('無法連線，請稍後再試'); return; }
     }
-    if (current !== epoch || !active()) return;
-    if (response.error) { notice('儲存失敗，請稍後再試'); return; }
-    if (!Array.isArray(response.data) || response.data.length === 0) { await changedNotice(id, current); return; }
+    if (identity !== identityEpoch || !canReadSummary()) return;
+    if (response.error) { if (current === epoch && active()) notice('儲存失敗，請稍後再試'); return; }
+    if (!Array.isArray(response.data) || response.data.length === 0) { requestSummary(pendingNow); await changedNotice(id, current); return; }
     const saved = response.data[0];
+    const showNotice = current === epoch && active();
     refresh();
+    if (!showNotice) return;
     const hiddenByFilter = selectedFilter !== 'all' && selectedFilter !== value;
     notice(hiddenByFilter ? `已記錄為${results[value]}（目前篩選未顯示）` : `已記錄：${results[value]}`, undoMinutes(saved) ? { actionLabel: '收回', onAction: () => undoResult(saved) } : undefined);
   } catch {
@@ -243,12 +346,13 @@ async function changedNotice(id, current) {
 }
 async function undoResult(lead) {
   const id = String(lead.id);
-  if (saving.has(id) || !active()) return;
+  if (saving.has(id) || !canReadSummary()) return;
   saving.add(id);
-  root.querySelectorAll('.lead-card').forEach(card => {
+  root?.querySelectorAll('.lead-card').forEach(card => {
     if (card.dataset.leadId === id) card.querySelectorAll('[data-lead-result],[data-lead-undo]').forEach(button => { button.disabled = true; });
   });
   const current = epoch;
+  const identity = identityEpoch;
   try {
     const client = window.GenieAuth.getClient();
     const run = () => client.rpc('genie_undo_contact_result', { p_id: lead.id, p_expected_result: lead.contact_result, p_expected_at: lead.contact_result_at });
@@ -259,12 +363,13 @@ async function undoResult(lead) {
       response = await run();
       if (response.status === 401) { notice('無法連線，請稍後再試'); return; }
     }
-    if (current !== epoch || !active()) return;
-    if (response.error) { notice('收回失敗，請稍後再試'); return; }
-    if (response.data === 'undone') { refresh(); notice('已改回待聯絡'); }
-    else if (response.data === 'changed') await changedNotice(id, current);
-    else if (response.data === 'expired') { refresh(); notice('已超過 15 分鐘，無法收回'); }
-    else notice('收回失敗，請稍後再試');
+    if (identity !== identityEpoch || !canReadSummary()) return;
+    const showNotice = current === epoch && active();
+    if (response.error) { if (showNotice) notice('收回失敗，請稍後再試'); return; }
+    if (response.data === 'undone') { refresh(); if (showNotice) notice('已改回待聯絡'); }
+    else if (response.data === 'changed') { requestSummary(pendingNow); await changedNotice(id, current); }
+    else if (response.data === 'expired') { refresh(); if (showNotice) notice('已超過 15 分鐘，無法收回'); }
+    else if (showNotice) notice('收回失敗，請稍後再試');
   } catch {
     if (current === epoch && active()) notice('收回失敗，請稍後再試');
   } finally {
@@ -312,6 +417,14 @@ async function createProject(cardElement) {
 $('#leads-view').addEventListener('click', event => {
   const tab = event.target.closest('[data-lead-tab]');
   if (tab) { activeTab = tab.dataset.leadTab; renderNavigation(); $('main').scrollTop = 0; tab.focus(); return; }
+  const wait = event.target.closest('[data-lead-wait]');
+  if (wait) {
+    pendingFilter = pendingFilter === wait.dataset.leadWait ? 'all' : wait.dataset.leadWait;
+    lists.pending = { items: [], more: true, loading: false, error: false };
+    renderSummary(); render('pending'); load('pending');
+    root.querySelector(`[data-lead-wait="${pendingFilter}"]`)?.focus();
+    return;
+  }
   const filter = event.target.closest('[data-lead-filter]');
   if (filter) {
     if (selectedFilter === filter.dataset.leadFilter) return;
@@ -333,5 +446,19 @@ $('#leads-view').addEventListener('click', event => {
   if (kind && sections[kind]) load(kind);
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+window.addEventListener('online', refresh);
+window.addEventListener('offline', showOffline);
+window.GenieAuth.subscribe(auth => {
+  if (auth.userId !== authIdentity) {
+    ++identityEpoch; ++epoch;
+    authIdentity = auth.userId;
+    activeTab = 'pending'; selectedFilter = pendingFilter = 'all';
+    totals = { pending: null, contacted: null }; filteredCount = null;
+    clearSummary();
+  }
+  if (auth.status !== 'member' || !navigator.onLine) clearSummary();
+  else if (authStatus !== 'member' || !summary) refresh();
+  authStatus = auth.status;
+});
 window.GenieLeads = { activate, deactivate, refresh, showOffline, fetchLead, refreshProjects };
 })();

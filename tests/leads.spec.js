@@ -1,99 +1,6 @@
 'use strict';
-const { test: base, expect } = require('@playwright/test');
-const {createCloud,cloudRoute}=require('./mock-cloud');
-
-const SELECT = 'id,status,answers,customer_name,phone,project_type,location,interior_area,budget_range,start_time,completed_at,contact_result,contact_result_at,contact_first_at,contact_undo_until,lead_grade,notification_status,messenger_user_id';
+const { test, expect, SELECT, lead, login, showContacted, showPending, releaseRead } = require('./mock-leads');
 const email = 'member@example.test';
-const user = { id: '00000000-0000-4000-8000-000000000001', email, app_metadata: { provider: 'email', providers: ['email'] }, user_metadata: {}, aud: 'authenticated', role: 'authenticated' };
-const session = () => ({ access_token: 'member-access-token', refresh_token: 'member-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, user });
-const lead = (id, extra = {}) => ({ id, status: 'complete', answers: { contact_time: ['平日晚上'] }, customer_name: `客戶 ${id}`, phone: '0912 345-678', project_type: '居家裝潢設計', location: '台中市', interior_area: 35, budget_range: '100–200 萬', start_time: '下個月', completed_at: new Date(Date.now() - 4 * 86400000).toISOString(), contact_result: null, contact_result_at: null, contact_first_at: null, contact_undo_until: null, lead_grade: 'hot', notification_status: 'failed', ...extra });
-
-const test = base.extend({
-  api: [async ({ page }, use) => {
-    const cloud=createCloud();
-    const api = { rows: [], requests: [], patches: [], rpcs: [], rpcResult: 'undone', rpcUnauthorized: false, fail: false, patchStatus: 200, unauthorized: false, refreshes: 0, refreshFails: false, holdReads: false, readWaiters: [], invalidCount: false };
-    await page.route('https://llqwzrgzekalwdnetvyb.supabase.co/**', async route => {
-      const request = route.request(), url = new URL(request.url());
-      const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'content-type': 'application/json' };
-      if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
-      if (url.pathname === '/rest/v1/genie_projects' || /\/rpc\/genie_(save|delete|restore)_project$/.test(url.pathname)) return cloudRoute(route,cloud,headers);
-      if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'password') return route.fulfill({ status: 200, headers, body: JSON.stringify(session()) });
-      if (url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'refresh_token') {
-        api.refreshes++;
-        return route.fulfill({ status: api.refreshFails ? 400 : 200, headers, body: JSON.stringify(api.refreshFails ? { error: 'invalid_grant', error_description: 'Refresh token expired' } : session()) });
-      }
-      if (url.pathname === '/auth/v1/logout') return route.fulfill({ status: 204, headers });
-      if (url.pathname === '/rest/v1/app_admins') return route.fulfill({ status: 200, headers, body: '[{"display_name":"測試成員","active":true}]' });
-      if (url.pathname === '/rest/v1/rpc/genie_undo_contact_result') {
-        const body = JSON.parse(request.postData());
-        api.rpcs.push(body);
-        if (api.rpcUnauthorized === true || api.rpcUnauthorized > 0) {
-          if (typeof api.rpcUnauthorized === 'number') api.rpcUnauthorized--;
-          return route.fulfill({ status: 401, headers, body: '{"code":"PGRST301","message":"JWT expired"}' });
-        }
-        if (api.rpcResult === 'undone') {
-          const row = api.rows.find(item => item.id === body.p_id);
-          if (row) { row.contact_result = null; row.contact_result_at = null; row.contact_undo_until = null; }
-        }
-        return route.fulfill({ status: 200, headers, body: JSON.stringify(api.rpcResult) });
-      }
-      if (url.pathname === '/rest/v1/customer_leads') {
-        if (request.method() === 'PATCH') api.patches.push({ url, body: request.postData(), headers: request.headers() });
-        else api.requests.push({ url, method: request.method(), headers: request.headers() });
-        if (api.unauthorized === true || api.unauthorized > 0) {
-          if (typeof api.unauthorized === 'number') api.unauthorized--;
-          return route.fulfill({ status: 401, headers, body: '{"code":"PGRST301","message":"JWT expired"}' });
-        }
-        if (request.method() === 'PATCH') {
-          if (api.patchStatus === 500) return route.fulfill({ status: 500, headers, body: '{"message":"write failed"}' });
-          if (api.patchStatus === 0) return route.fulfill({ status: 200, headers, body: '[]' });
-          const row = api.rows.find(item => item.id === url.searchParams.get('id')?.replace(/^eq\./, ''));
-          if (!row) return route.fulfill({ status: 200, headers, body: '[]' });
-          if (url.searchParams.get('contact_result') !== (row.contact_result === null ? 'is.null' : `eq.${row.contact_result}`)) return route.fulfill({ status: 200, headers, body: '[]' });
-          if (row.contact_result !== null && url.searchParams.get('contact_result_at') !== `eq.${row.contact_result_at}`) return route.fulfill({ status: 200, headers, body: '[]' });
-          const first = row.contact_result === null;
-          row.contact_result = JSON.parse(request.postData()).contact_result;
-          row.contact_result_at = new Date().toISOString();
-          row.contact_undo_until = first ? new Date(Date.now() + 15 * 60000).toISOString() : null;
-          return route.fulfill({ status: 200, headers, body: JSON.stringify([row]) });
-        }
-        if (api.fail) return route.fulfill({ status: 500, headers, body: '{"message":"read failed"}' });
-        if (url.searchParams.has('id')) {
-          const row = api.rows.find(item => item.id === url.searchParams.get('id')?.replace(/^eq\./, ''));
-          return route.fulfill({ status: 200, headers, body: JSON.stringify(row ? [row] : []) });
-        }
-        if (api.holdReads) await new Promise(resolve => api.readWaiters.push({ url, method: request.method(), release: resolve }));
-        const resultFilter = url.searchParams.get('contact_result');
-        const pending = resultFilter === 'is.null';
-        const rows = api.rows.filter(row => pending ? row.contact_result === null : resultFilter === 'not.is.null' ? row.contact_result !== null : row.contact_result === resultFilter?.replace(/^eq\./, ''));
-        const offset = Number(url.searchParams.get('offset') || 0), limit = Number(url.searchParams.get('limit') || (pending ? 50 : 20));
-        const ranged = rows.slice(offset, offset + limit);
-        const total = api.invalidCount ? 'invalid' : rows.length;
-        return route.fulfill({ status: 200, headers: { ...headers, 'content-range': ranged.length ? `${offset}-${offset + ranged.length - 1}/${total}` : `*/${total}`, 'access-control-expose-headers': 'content-range' }, body: request.method() === 'HEAD' ? '' : JSON.stringify(ranged) });
-      }
-      return route.fulfill({ status: 500, headers, body: '{}' });
-    });
-    await page.goto('/');
-    await expect(page.locator('#leads-login')).toBeVisible();
-    await use(api);
-  }, { auto: true }],
-});
-
-async function login(page) {
-  await page.locator('#leads-login [name="email"]').fill(email);
-  await page.locator('#leads-login [name="password"]').fill('test-password');
-  await page.locator('#leads-login button[type="submit"]').click();
-  await expect(page.locator('#list-view')).toBeVisible();
-  await page.getByRole('button', { name: '客戶名單', exact: true }).click();
-  await expect(page.locator('#leads-list')).toBeVisible();
-}
-async function showContacted(page) { await page.locator('[data-lead-tab="contacted"]').click(); }
-async function showPending(page) { await page.locator('[data-lead-tab="pending"]').click(); }
-function releaseRead(api, method, filter) {
-  const index = api.readWaiters.findIndex(waiter => waiter.method === method && waiter.url.searchParams.get('contact_result') === filter);
-  expect(index).toBeGreaterThanOrEqual(0);
-  api.readWaiters.splice(index, 1)[0].release();
-}
 
 test('明列欄位、篩選排序與卡片內容安全顯示', async ({ page, api }) => {
   api.rows = [lead('one', { customer_name: '<img src=x onerror=alert(1)>', phone: '+886 (912) 345-678' }), lead('two', { contact_result: 'site_visit', contact_result_at: new Date().toISOString(), lead_grade: null, notification_status: 'sent' })];
@@ -112,7 +19,7 @@ test('明列欄位、篩選排序與卡片內容安全顯示', async ({ page, ap
   expect(contacted.url.searchParams.get('order')).toBe('contact_result_at.desc');
   expect(contacted.url.searchParams.get('limit')).toBe('20');
   const card = page.locator('[data-lead-section="pending"] .lead-card');
-  for (const value of ['居家裝潢設計', '台中市', '35', '100–200 萬', '下個月', '平日晚上', '+886 (912) 345-678', '超過 3 天未聯絡', '🔥 高分', '通知信寄送失敗']) await expect(card).toContainText(value);
+  for (const value of ['居家裝潢設計', '台中市', '35', '100–200 萬', '下個月', '平日晚上', '+886 (912) 345-678', '🟡 4 天前', '🔥 高分', '通知信寄送失敗']) await expect(card).toContainText(value);
   await expect(card.locator('a[href^="tel:"]')).toHaveAttribute('href', 'tel:+886912345-678');
   await expect(card.locator('img')).toHaveCount(0);
   await expect(card).toContainText('<img src=x onerror=alert(1)>');
@@ -290,7 +197,7 @@ test('重新整理讀取中保留舊總數，非有限 count 顯示破折號', a
   await expect(page.locator('[data-lead-tab="contacted"]')).toContainText('0');
   api.holdReads = false;
   api.readWaiters.splice(0).forEach(waiter => waiter.release());
-  await expect(page.locator('[data-lead-tab="pending"]')).toContainText('—');
+  await expect(page.locator('[data-lead-tab="pending"]')).toContainText('1');
   await expect(page.locator('[data-lead-tab="contacted"]')).toContainText('—');
 });
 
@@ -386,6 +293,8 @@ test('寫入時 401 續期後重試，仍失敗則返回登入', async ({ page, 
   api.rows = [lead('retry')];
   await login(page);
   await expect(page.locator('[data-lead-section="contacted"]')).toContainText('還沒有已回報的客戶');
+  await expect(page.locator('#lead-nav-badge')).toHaveText('1');
+  api.unauthorizedMethod = 'PATCH';
   api.unauthorized = 1;
   await page.locator('[data-lead-id="retry"]').getByRole('button', { name: '聯絡不上' }).click();
   await expect(page.locator('[data-lead-section="contacted"] .lead-card')).toHaveCount(1);
