@@ -30,6 +30,181 @@ let totals = { pending: null, contacted: null }, filteredCount = null;
 const saving = new Set();
 const creating = new Set();
 let undoTimer;
+let taskTemplates = null;
+let taskRows = new Map(), taskDrafts = new Map(), taskRequests = new Map();
+let taskFocus = null;
+let replacingTaskDOM = false;
+const completingTasks = new Set();
+
+/* ================= 流程待辦（範本快取與批次讀取） ================= */
+const stepIdentity = (run, key) => JSON.stringify([run.playbook_key, run.version, key]);
+function clearTasks(preserveDrafts = false) {
+  taskRows = new Map(); taskRequests = new Map();
+  if (!preserveDrafts) { taskDrafts = new Map(); taskFocus = null; }
+}
+async function taskRead(run, valid) {
+  let response = await run();
+  if (!valid()) return null;
+  if (response.status === 401) {
+    const session = await window.GenieAuth.refresh();
+    if (!session || !valid()) return null;
+    response = await run();
+  }
+  if (!valid()) return null;
+  if (response.error || !Array.isArray(response.data)) throw Error('下一步讀取失敗');
+  return response.data;
+}
+function loadTaskTemplates() {
+  if (taskTemplates) return taskTemplates.promise;
+  const cache = { steps: new Map(), transitions: [], ready: false }, identity = identityEpoch;
+  taskTemplates = cache;
+  const valid = () => taskTemplates === cache && identity === identityEpoch && active() && canReadSummary();
+  const client = window.GenieAuth.getClient();
+  // 範本可能升版；批次分頁避免 REST 預設筆數上限截斷舊輪次的範本。
+  const readAll = async table => {
+    const rows = [];
+    for (let offset = 0; valid(); offset += 1000) {
+      let query = client.from(table).select('*').order('playbook_key').order('version').order('step_key');
+      if (table === 'lead_playbook_transitions') query = query.order('outcome_key');
+      const page = await taskRead(() => query.range(offset, offset + 999), valid);
+      if (!page) return null;
+      rows.push(...page);
+      if (page.length < 1000) return rows;
+    }
+    return null;
+  };
+  cache.promise = Promise.all([readAll('lead_playbook_steps'), readAll('lead_playbook_transitions')]).then(([steps, transitions]) => {
+    if (!valid() || !steps || !transitions) { if (taskTemplates === cache) taskTemplates = null; return false; }
+    cache.steps = new Map(steps.map(step => [stepIdentity(step, step.step_key), step]));
+    cache.transitions = transitions.slice().sort((a, b) => a.sort - b.sort);
+    cache.ready = true;
+    return true;
+  }).catch(() => { if (taskTemplates === cache) taskTemplates = null; return false; });
+  return cache.promise;
+}
+async function loadTasks(leads) {
+  if (!leads.length || !active() || !canReadSummary()) return;
+  const current = epoch, state = lists.contacted, identity = identityEpoch;
+  const ids = leads.map(lead => String(lead.id));
+  const requests = new Map(ids.map(id => {
+    const request = (taskRequests.get(id) || 0) + 1;
+    taskRequests.set(id, request);
+    return [id, request];
+  }));
+  const valid = () => current === epoch && identity === identityEpoch && state === lists.contacted && active() && canReadSummary();
+  try {
+    const client = window.GenieAuth.getClient();
+    const [ready, tasks, latest] = await Promise.all([
+      loadTaskTemplates(),
+      taskRead(() => client.from('lead_tasks').select('id,run_id,lead_id,step_key,status,due_at,version').eq('status', 'open').in('lead_id', ids), valid),
+      // 每位名單各取最新輪次與錯誤；嵌入關聯的 limit 為每位父列各 1 筆。
+      taskRead(() => client.from('customer_leads').select('id,lead_playbook_runs(id,lead_id,run_no,playbook_key,version,source_result,status),lead_task_errors(created_at)')
+        .in('id', ids).order('run_no', { referencedTable: 'lead_playbook_runs', ascending: false }).limit(1, { referencedTable: 'lead_playbook_runs' })
+        .order('created_at', { referencedTable: 'lead_task_errors', ascending: false }).limit(1, { referencedTable: 'lead_task_errors' }), valid),
+    ]);
+    if (!valid() || !tasks || !latest) return;
+    for (const id of ids) {
+      if (requests.get(id) !== taskRequests.get(id)) continue;
+      const row = latest.find(item => String(item.id) === id);
+      const run = row?.lead_playbook_runs?.[0] || null;
+      const task = tasks.find(task => String(task.lead_id) === id && task.run_id === run?.id) || null;
+      taskRows.set(id, { run, task,
+        errorAt: row?.lead_task_errors?.[0]?.created_at, readError: !ready });
+      if (taskDrafts.get(id)?.taskId !== task?.id) taskDrafts.delete(id);
+    }
+  } catch {
+    if (valid()) for (const id of ids) if (requests.get(id) === taskRequests.get(id)) taskRows.set(id, { readError: true });
+  }
+  if (valid()) render('contacted');
+}
+function taipeiDay(value) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date(value)).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+function taskDue(task) {
+  const due = Date.parse(task.due_at), now = Date.now();
+  if (!Number.isFinite(due)) return '';
+  const display = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(due));
+  const elapsed = now - due;
+  const status = elapsed > 0 ? `🔴 已逾期 ${elapsed < 86400000 ? `${Math.max(1, Math.floor(elapsed / hourMs))} 小時` : `${Math.floor(elapsed / 86400000)} 天`}`
+    : taipeiDay(due) === taipeiDay(now) ? '🟡 今天到期' : '';
+  return `<time datetime="${esc(task.due_at)}">${esc(`到期 ${display}`)}</time>${status ? `<span class="lead-task-due ${elapsed > 0 ? 'overdue' : 'today'}">${esc(status)}</span>` : ''}`;
+}
+function taskBlock(lead) {
+  const id = String(lead.id), data = taskRows.get(id);
+  if (!data) return '';
+  if (data.readError) return '<div class="lead-task-block"><p class="lead-error" role="alert">下一步讀取失敗，請按重新整理</p></div>';
+  if (lead.contact_result_at && Date.parse(data.errorAt) >= Date.parse(lead.contact_result_at)) {
+    return '<div class="lead-task-block"><p class="lead-error" role="alert">⚠️ 下一步沒有建立成功，請通知管理員</p></div>';
+  }
+  const { run, task } = data;
+  if (!run || run.source_result !== lead.contact_result) return '';
+  if (run.status === 'finished') return '<div class="lead-task-block">✓ 流程已完成</div>';
+  if (run.status !== 'active' || !task) return '';
+  const step = taskTemplates?.steps.get(stepIdentity(run, task.step_key));
+  if (!step) return '<div class="lead-task-block"><p class="lead-error" role="alert">下一步讀取失敗，請按重新整理</p></div>';
+  const choices = taskTemplates.transitions.filter(item => stepIdentity(item, item.step_key) === stepIdentity(run, task.step_key));
+  const draft = taskDrafts.get(id), busy = completingTasks.has(id);
+  const selected = draft && choices.find(item => item.outcome_key === draft.outcome && draft.taskId === task.id);
+  const inputDue = selected?.next_step_key && taskTemplates.steps.get(stepIdentity(run, selected.next_step_key))?.due_kind === 'input';
+  return `<section class="lead-task-block" aria-label="下一步"><div class="lead-task-heading"><strong>${esc(`下一步：${step.label}`)}</strong>${taskDue(task)}</div>
+    <div class="lead-task-results" role="group" aria-label="下一步結果">${choices.map(item => `<button type="button" data-task-outcome="${esc(item.outcome_key)}" ${busy ? 'disabled' : ''}>${esc(item.outcome_label)}</button>`).join('')}</div>
+    ${selected ? `<form class="lead-task-confirm" data-task-confirm><strong>${esc(`確認結果：${selected.outcome_label}`)}</strong>
+      <label>備註（選填，最多 500 字）<textarea name="task_note" maxlength="500" rows="3" ${busy ? 'disabled' : ''}>${esc(draft.note)}</textarea></label>
+      ${inputDue ? `<label>下一步日期時間（台北時間，必填）<input type="datetime-local" name="task_due" value="${esc(draft.due)}" required ${busy ? 'disabled' : ''}></label>` : ''}
+      ${draft.error ? `<p class="lead-error" role="alert">${esc(draft.error)}</p>` : ''}
+      <div class="lead-task-results"><button type="submit" ${busy ? 'disabled' : ''}>${busy ? '送出中…' : '確定'}</button><button type="button" data-task-cancel ${busy ? 'disabled' : ''}>取消</button></div></form>` : ''}</section>`;
+}
+async function completeTask(form) {
+  const id = form.closest('.lead-card')?.dataset.leadId, draft = taskDrafts.get(id), data = taskRows.get(id);
+  if (!draft || !data?.task || completingTasks.has(id)) return;
+  if (!canReadSummary()) { notice('需連線才能完成下一步，請連線後重試'); return; }
+  const transition = taskTemplates.transitions.find(item => stepIdentity(item, item.step_key) === stepIdentity(data.run, data.task.step_key) && item.outcome_key === draft.outcome);
+  const inputDue = transition?.next_step_key && taskTemplates.steps.get(stepIdentity(data.run, transition.next_step_key))?.due_kind === 'input';
+  draft.note = form.elements.task_note.value;
+  draft.due = form.elements.task_due?.value || '';
+  const nextDue = inputDue && draft.due ? `${draft.due}${draft.due.length === 16 ? ':00' : ''}+08:00` : null;
+  if ([...draft.note].length > 500 || (inputDue && (!nextDue || !Number.isFinite(Date.parse(nextDue))))) {
+    draft.error = inputDue && !nextDue ? '請填下一步日期時間（台北時間）' : '請確認備註不超過 500 字且日期時間有效';
+    render('contacted'); return;
+  }
+  const current = epoch, identity = identityEpoch;
+  const valid = () => current === epoch && identity === identityEpoch && active() && canReadSummary();
+  completingTasks.add(id); draft.error = ''; render('contacted');
+  try {
+    const client = window.GenieAuth.getClient();
+    const run = () => client.rpc('genie_complete_task', { p_id: data.task.id, p_expected_version: data.task.version,
+      p_outcome: draft.outcome, p_note: draft.note || null, p_next_due_at: nextDue });
+    let response = await run();
+    if (!valid()) return;
+    if (response.status === 401) {
+      const session = await window.GenieAuth.refresh();
+      if (!session || !valid()) return;
+      response = await run();
+    }
+    if (!valid()) return;
+    if (response.error) throw Error('送出失敗');
+    if (response.data?.status === 'completed') {
+      await loadTasks([findLead(id)]);
+      if (valid()) notice(`已完成：${taskTemplates.steps.get(stepIdentity(data.run, data.task.step_key)).label}`);
+    } else if (['conflict', 'inactive', 'not_found'].includes(response.data?.status)) {
+      const lead = await fetchLead(id);
+      if (!valid()) return;
+      const index = lists.contacted.items.findIndex(item => String(item.id) === id);
+      if (index >= 0) lists.contacted.items[index] = lead;
+      if (lead.contact_result === null) refresh(); else await loadTasks([lead]);
+      if (identity === identityEpoch && active()) notice('這筆剛被更新，已重新整理');
+    } else if (response.data?.status === 'invalid') {
+      draft.error = '結果或下一步日期無效，請確認日期時間與備註（最多 500 字）';
+    } else throw Error('送出失敗');
+  } catch {
+    if (valid()) draft.error = '送出失敗，請確認連線後重試';
+  } finally {
+    if (identity === identityEpoch) completingTasks.delete(id);
+    if (valid()) render('contacted');
+  }
+}
 
 /* ================= 待聯絡分級（不依賴名單頁 DOM） ================= */
 function canReadSummary() { return window.GenieAuth.getState().status === 'member' && navigator.onLine; }
@@ -187,6 +362,7 @@ function card(lead, kind) {
     <div class="lead-card-top"><h3>${esc(valueText(lead.customer_name))}</h3><div class="lead-tags">${grade}${waitTag}${lead.notification_status === 'failed' ? '<span class="lead-tag lead-alert">通知信寄送失敗</span>' : ''}</div></div>
     <dl class="lead-fields">${field('服務', lead.project_type)}${field('地區', lead.location)}${field('坪數', lead.interior_area)}${field('預算', lead.budget_range)}${field('開始時間', lead.start_time)}${field('方便聯絡時段', contactTime)}<div><dt>姓名</dt><dd>${esc(valueText(lead.customer_name))}</dd></div><div><dt>電話</dt><dd>${phoneHtml}</dd></div><div><dt>送出時間</dt><dd>${timeHtml(lead.completed_at)}</dd></div>${kind === 'contacted' ? `<div><dt>聯絡結果</dt><dd>${esc(results[lead.contact_result] || valueText(lead.contact_result))}</dd></div><div><dt>結果時間</dt><dd>${timeHtml(lead.contact_result_at)}</dd></div>` : ''}</dl>
     <div class="lead-actions"><div class="lead-results" role="group" aria-label="聯絡結果">${resultButtons}</div>${minutes ? `<div class="lead-undo-wrap"><button type="button" class="lead-undo" data-lead-undo ${saving.has(String(lead.id)) ? 'disabled' : ''}>收回，改回待聯絡</button><span class="lead-undo-time">還可收回 ${minutes} 分鐘</span></div>` : ''}${messenger ? '<button type="button" class="lead-messenger" data-lead-messenger>💬 Messenger</button>' : ''}</div>
+    ${kind === 'contacted' ? taskBlock(lead) : ''}
     <div class="lead-project-action"><button type="button" class="lead-project-button" data-lead-project ${createDisabled ? 'disabled' : ''}>${creating.has(String(lead.id)) ? '建立中…' : existing ? '開啟專案' : '帶入名單建立專案'}</button><span>儲存後同步到雲端</span></div>
   </article>`;
 }
@@ -194,9 +370,36 @@ function render(kind) {
   if (!active()) return;
   const state = lists[kind], target = root.querySelector(`[data-lead-section="${kind}"]`);
   if (!target) return;
+  if (kind === 'contacted') {
+    const focused = document.activeElement;
+    const id = focused?.closest('[data-task-confirm]')?.closest('.lead-card')?.dataset.leadId;
+    const draft = taskDrafts.get(id);
+    if (draft && target.contains(focused) && ['task_note', 'task_due'].includes(focused.name)) {
+      taskFocus = { id, taskId: draft.taskId, name: focused.name, start: focused.selectionStart,
+        end: focused.selectionEnd, direction: focused.selectionDirection };
+    }
+    if (taskFocus && taskDrafts.get(taskFocus.id)?.taskId !== taskFocus.taskId) taskFocus = null;
+  }
   const empty = kind === 'pending' && pendingFilter !== 'all' ? '這一級目前沒有待聯絡的客人' : kind === 'contacted' && selectedFilter !== 'all' ? '目前篩選沒有資料' : sections[kind].empty;
   const content = state.items.map((item, index) => { try { return card(item, kind); } catch (error) { console.warn(`第 ${index + 1} 筆名單無法顯示`, error); return '<p class="lead-error" role="alert">一筆名單無法顯示，請重新整理</p>'; } }).join('') || (state.loading ? '<p class="lead-state" role="status">讀取中…</p>' : state.error ? '' : `<p class="lead-state">${esc(empty)}</p>`);
-  target.innerHTML = `<div class="lead-cards">${content}</div>${state.error ? '<p class="lead-error" role="alert">讀取失敗，請按重新整理</p>' : ''}${state.more && !state.error ? `<button type="button" class="lead-more" data-lead-more="${kind}" ${state.loading ? 'disabled' : ''}>${state.loading ? '讀取中…' : '載入更多'}</button>` : ''}`;
+  // 只在同步替換 DOM 時保留失焦記錄；使用者失焦後立即重畫也不能誤判。
+  replacingTaskDOM = kind === 'contacted';
+  try {
+    target.innerHTML = `<div class="lead-cards">${content}</div>${state.error ? '<p class="lead-error" role="alert">讀取失敗，請按重新整理</p>' : ''}${state.more && !state.error ? `<button type="button" class="lead-more" data-lead-more="${kind}" ${state.loading ? 'disabled' : ''}>${state.loading ? '讀取中…' : '載入更多'}</button>` : ''}`;
+  } finally { replacingTaskDOM = false; }
+  // refresh 的空白／讀取中畫面也保留焦點記錄，等同一待辦的確認區回來再還原。
+  if (kind === 'contacted' && taskFocus) {
+    const restore = taskFocus;
+    const form = [...target.querySelectorAll('[data-task-confirm]')].find(form => form.closest('.lead-card').dataset.leadId === restore.id);
+    const focused = form?.elements.namedItem(restore.name);
+    if (focused && !focused.disabled) {
+      // 記錄只供這次 DOM 移除還原；成功後不留下會再次搶焦點的舊記錄。
+      taskFocus = null;
+      focused.focus({ preventScroll: true });
+      // datetime-local 不支援選取範圍；只有文字欄位才還原游標。
+      if (restore.start !== null) focused.setSelectionRange(restore.start, restore.end, restore.direction);
+    }
+  }
 }
 async function query(kind, offset, filter = selectedFilter, head = false, wait = pendingFilter, now = pendingNow) {
   const client = window.GenieAuth.getClient(), section = sections[kind];
@@ -238,6 +441,7 @@ async function load(kind) {
     if (response.error) throw response.error;
     const rows = Array.isArray(response.data) ? response.data : [];
     state.items.push(...rows);
+    if (kind === 'contacted') loadTasks(rows);
     if (offset === 0) {
       const count = Number.isFinite(response.count) ? response.count : null;
       state.total = count;
@@ -267,6 +471,7 @@ function refresh() {
   requestSummary(pendingNow);
   if (!active()) return;
   ++epoch;
+  clearTasks(true);
   lists = Object.fromEntries(Object.keys(sections).map(kind => [kind, { items: [], more: true, loading: false, error: false }]));
   renderNavigation();
   if (!canReadSummary()) { showOffline(); return; }
@@ -283,6 +488,7 @@ function showOffline() {
   Object.keys(sections).forEach(render);
 }
 function activate() {
+  taskTemplates = null;
   root = $('#leads-list');
   if (root) {
     renderNavigation();
@@ -292,7 +498,7 @@ function activate() {
     undoTimer = setInterval(() => { if (active()) render('contacted'); }, 30000);
   }
 }
-function deactivate() { ++epoch; ++contactedTotalRequest; root = null; clearInterval(undoTimer); }
+function deactivate() { ++epoch; ++contactedTotalRequest; taskTemplates = null; clearTasks(); root = null; clearInterval(undoTimer); }
 function refreshProjects() { if (active()) Object.keys(sections).forEach(render); }
 async function saveResult(cardElement, value) {
   const id = cardElement.dataset.leadId;
@@ -415,6 +621,17 @@ async function createProject(cardElement) {
   }
 }
 $('#leads-view').addEventListener('click', event => {
+  const taskOutcome = event.target.closest('[data-task-outcome]');
+  if (taskOutcome) {
+    const id = taskOutcome.closest('.lead-card').dataset.leadId, data = taskRows.get(id);
+    if (data?.task && !completingTasks.has(id)) {
+      taskDrafts.set(id, { taskId: data.task.id, outcome: taskOutcome.dataset.taskOutcome, note: '', due: '', error: '' });
+      render('contacted');
+    }
+    return;
+  }
+  const taskCancel = event.target.closest('[data-task-cancel]');
+  if (taskCancel) { const id = taskCancel.closest('.lead-card').dataset.leadId; if (!completingTasks.has(id)) { taskDrafts.delete(id); render('contacted'); } return; }
   const tab = event.target.closest('[data-lead-tab]');
   if (tab) { activeTab = tab.dataset.leadTab; renderNavigation(); $('main').scrollTop = 0; tab.focus(); return; }
   const wait = event.target.closest('[data-lead-wait]');
@@ -445,12 +662,32 @@ $('#leads-view').addEventListener('click', event => {
   const kind = event.target.closest('[data-lead-more]')?.dataset.leadMore;
   if (kind && sections[kind]) load(kind);
 });
+$('#leads-view').addEventListener('input', event => {
+  if (!event.target.closest('[data-task-confirm]')) return;
+  const draft = taskDrafts.get(event.target.closest('.lead-card').dataset.leadId);
+  if (draft) { if (event.target.name === 'task_note') draft.note = event.target.value; if (event.target.name === 'task_due') draft.due = event.target.value; }
+});
+document.addEventListener('focusin', () => {
+  // 包含同一確認區或另一張卡的控制項；重畫還原已先取出自己的記錄。
+  taskFocus = null;
+});
+document.addEventListener('focusout', () => {
+  if (!replacingTaskDOM) taskFocus = null;
+});
+document.addEventListener('pointerdown', () => {
+  // refresh 等待時欄位已不在 DOM，點空白處不一定有 focusout。
+  taskFocus = null;
+});
+$('#leads-view').addEventListener('submit', event => {
+  if (event.target.matches('[data-task-confirm]')) { event.preventDefault(); completeTask(event.target); }
+});
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 window.addEventListener('online', refresh);
 window.addEventListener('offline', showOffline);
 window.GenieAuth.subscribe(auth => {
   if (auth.userId !== authIdentity) {
     ++identityEpoch; ++epoch;
+    taskTemplates = null; clearTasks(); completingTasks.clear();
     authIdentity = auth.userId;
     activeTab = 'pending'; selectedFilter = pendingFilter = 'all';
     totals = { pending: null, contacted: null }; filteredCount = null;

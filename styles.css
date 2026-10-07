@@ -178,6 +178,21 @@ main,#list-view,#detail-view,.detail-body,.card{min-width:0}
 .lead-project-button{min-height:44px;padding:9px 14px;border-radius:6px;background:#111;color:#fff;font-size:13px;font-weight:600;cursor:pointer}
 .lead-project-button:disabled{opacity:.55;cursor:wait}
 .lead-project-action span{font-size:12px;color:#6b7280}
+/* ================= 流程下一步 ================= */
+.lead-task-block{margin-top:14px;padding:14px 0 0;border-top:1px solid var(--line);overflow-wrap:anywhere;min-width:0}
+.lead-task-heading{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-bottom:10px}
+.lead-task-heading strong{flex-basis:100%}
+.lead-task-heading time{font-size:13px;color:#525d68}
+.lead-task-due{font-size:13px;font-weight:600;border-radius:5px;padding:4px 7px}
+.lead-task-due.overdue{color:#9c2525;background:#fff0f0}.lead-task-due.today{color:#765209;background:#fff7db}
+.lead-task-results{display:flex;flex-wrap:wrap;gap:8px}
+.lead-task-results button{min-height:44px;max-width:100%;white-space:normal;overflow-wrap:anywhere;padding:9px 12px;border:1px solid #cbd0d6;border-radius:6px;background:#fff;color:#222;cursor:pointer}
+.lead-task-results button:hover{background:#e8ebee}.lead-task-results button:disabled{opacity:.55;cursor:wait}
+.lead-task-results button:focus-visible{outline:2px solid #5676a4;outline-offset:2px}
+.lead-task-confirm{display:grid;gap:12px;margin-top:12px;padding:12px;background:#f5f7fa;border-radius:6px;min-width:0}
+.lead-task-confirm label{display:grid;gap:6px;font-size:13px;min-width:0}
+.lead-task-confirm textarea,.lead-task-confirm input{box-sizing:border-box;width:100%;max-width:100%;min-width:0;min-height:44px;padding:9px;border:1px solid #cbd0d6;border-radius:5px;font:inherit;background:#fff;color:#222}
+.lead-task-confirm textarea{resize:vertical}.lead-task-confirm .lead-error{margin:0}
 .lead-update-status:not(:empty){margin-top:12px;padding:10px 12px;border-radius:6px;background:#fffbeb;color:#805600;border:1px solid #fcd34d}
 .storage-warning{margin:12px 16px;padding:12px 16px;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;border-radius:8px}
 .storage-warning[hidden]{display:none}
