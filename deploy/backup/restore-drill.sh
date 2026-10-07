@@ -145,18 +145,27 @@ cat >"$work/worker.sh" <<'WORKER'
 #!/bin/sh
 set -u
 cd /work || exit 1
-pg_restore -l archive.dump >toc || exit 1
+# Record the stage and only the primary ERROR line (terse; no SQL text, rows or secrets).
+step() {
+    printf '%s\n' "$1" >stage; shift
+    "$@" >/dev/null 2>err && return 0
+    grep -m1 'ERROR' err | sed 's/^.*ERROR: */ERROR: /' | cut -c1-160 >error
+    exit 1
+}
+printf '%s\n' 'toc' >stage; pg_restore -l archive.dump >toc 2>err || exit 1
 # New Supabase already owns public and its platform default privileges.
 # Skip the CREATE SCHEMA item and DEFAULT ACL items (postgres cannot alter
 # supabase_admin's defaults; the new project already has its own).
 awk '!/ SCHEMA - public / && !/ DEFAULT ACL /' toc >restore.list || exit 1
-psql -X -q -v ON_ERROR_STOP=1 -f prepare.sql || exit 1
-pg_restore --exit-on-error --no-owner --section=pre-data --use-list=restore.list --dbname=postgres archive.dump || exit 1
-pg_restore --exit-on-error --no-owner --section=data --use-list=restore.list --dbname=postgres archive.dump || exit 1
-psql -X -q -v ON_ERROR_STOP=1 -f remap.sql || exit 1
-pg_restore --exit-on-error --no-owner --section=post-data --use-list=restore.list --file=post.sql archive.dump || exit 1
-psql -X -q -v ON_ERROR_STOP=1 -f post-wrapper.sql || exit 1
-psql -X -q -v ON_ERROR_STOP=1 -f verify-restore.sql >verify.out || exit 1
+step 'prepare (target must be empty, webhooks enabled)' psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=terse -f prepare.sql
+step 'pre-data' pg_restore --exit-on-error --no-owner --section=pre-data --use-list=restore.list --dbname=postgres archive.dump
+step 'data' pg_restore --exit-on-error --no-owner --section=data --use-list=restore.list --dbname=postgres archive.dump
+step 'uuid remap' psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=terse -f remap.sql
+step 'post-data extract' pg_restore --exit-on-error --no-owner --section=post-data --use-list=restore.list --file=post.sql archive.dump
+step 'post-data apply' psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=terse -f post-wrapper.sql
+printf '%s\n' 'verification' >stage
+psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=terse -f verify-restore.sql >verify.out 2>err || {
+    grep -m1 'ERROR' err | sed 's/^.*ERROR: */ERROR: /' | cut -c1-160 >error; exit 1; }
 grep -qx 'BACKUP_RESTORE_OK' verify.out || exit 1
 WORKER
 [ "$?" -eq 0 ] || fail 'worker preparation'
@@ -169,5 +178,9 @@ timeout --signal=TERM --kill-after=20 "$seconds" docker run --rm --name "$contai
     --env PGHOST --env PGUSER --env PGPORT --env PGDATABASE --env PGSSLMODE \
     --env PGCONNECT_TIMEOUT --env PGPASSFILE \
     --entrypoint /bin/sh "postgres:$PG_MAJOR-alpine" /work/worker.sh \
-    >/dev/null 2>&1 || fail 'restore or SQL verification (test project may be partial; recreate it)'
+    >/dev/null 2>&1 || {
+        stage=$(cat "$work/stage" 2>/dev/null || printf 'container start')
+        reason=$(cat "$work/error" 2>/dev/null || :)
+        fail "$stage: ${reason:-no error text} (test project may be partial; clear its public schema or recreate it)"
+    }
 printf '%s\n' 'BACKUP_RESTORE_OK' 'REST_LOGIN_CHECK_REQUIRED: read leads and projects as a test member'
