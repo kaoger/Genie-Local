@@ -130,6 +130,21 @@ cat >"$work/post-wrapper.sql" <<'SQL'
 \set ON_ERROR_STOP on
 BEGIN;
 \i /work/post.sql
+-- New Supabase projects auto-grant EXECUTE/table privileges to anon, authenticated and
+-- service_role through platform default privileges; pg_dump only replays the source's
+-- grants. Reset those roles on every public object, then replay the archived ACLs exactly.
+DO $reset$ DECLARE r record; BEGIN
+ FOR r IN SELECT p.oid::regprocedure AS f FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+ WHERE n.nspname='public' LOOP
+ EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated, service_role', r.f);
+ END LOOP;
+ FOR r IN SELECT c.relname, c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+ WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f','S') LOOP
+ EXECUTE format('REVOKE ALL ON %s public.%I FROM PUBLIC, anon, authenticated, service_role',
+  CASE WHEN r.relkind='S' THEN 'SEQUENCE' ELSE 'TABLE' END, r.relname);
+ END LOOP;
+END $reset$;
+\i /work/acl.sql
 -- Disable all public USER triggers within the same transaction as their creation.
 -- Constraint triggers stay enabled. No table mutation occurs after post-data.
 DO $disable$ DECLARE r record; BEGIN
@@ -161,6 +176,8 @@ step 'prepare (target must be empty, webhooks enabled)' psql -X -q -v ON_ERROR_S
 step 'pre-data' pg_restore --exit-on-error --no-owner --section=pre-data --use-list=restore.list --dbname=postgres archive.dump
 step 'data' pg_restore --exit-on-error --no-owner --section=data --use-list=restore.list --dbname=postgres archive.dump
 step 'uuid remap' psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=terse -f remap.sql
+awk '$4=="ACL" && !/ SCHEMA - public /' toc >acl.list || exit 1
+step 'acl extract' pg_restore --exit-on-error --no-owner --use-list=acl.list --file=acl.sql archive.dump
 step 'post-data extract' pg_restore --exit-on-error --no-owner --section=post-data --use-list=restore.list --file=post.sql archive.dump
 step 'post-data apply' psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=terse -f post-wrapper.sql
 printf '%s\n' 'verification' >stage

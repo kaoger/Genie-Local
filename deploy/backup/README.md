@@ -156,7 +156,7 @@
      /var/lib/genie-backup/genie-<UTC_TIMESTAMP>.dump
    ```
 
-   順序：hash → pre-data → data → UUID remap → post-data。還原清單排除 `SCHEMA - public` 與 `DEFAULT ACL` 項目（平台管理的預設權限，postgres 無權修改，新專案自帶；2026-10-07 演練實測）。data／UUID remap 時尚無 public 使用者 trigger，不使用 replica 模式隱藏外鍵錯誤。post-data 與停用全部 public 使用者 trigger 在同一個交易內完成，外鍵 constraint trigger 保持啟用。原 webhook secret 可能存在 archive，演練不刪其定義，但**所有 public USER trigger 保持 DISABLED**，包含 audit/version trigger，避免通知與資料改寫。演練限讀取；不要在這個 trigger 停用狀態測專案寫入。Dashboard 的「支援已啟用」不代表通知 trigger 有啟用；SQL `tgenabled='D'` 才是驗收條件。[Webhook 底層是 PostgreSQL trigger](https://supabase.com/docs/guides/database/webhooks)、[停用 trigger 語法](https://www.postgresql.org/docs/current/sql-altertable.html)
+   順序：hash → pre-data → data → UUID remap → post-data。還原清單排除 `SCHEMA - public` 與 `DEFAULT ACL` 項目（平台管理的預設權限，postgres 無權修改，新專案自帶；2026-10-07 演練實測）。新專案會經由平台預設權限自動把函式／表權限給 anon、authenticated、service_role，pg_dump 只重播來源的 GRANT；因此 post-data 之後會先對 public 所有物件收回這三個角色與 PUBLIC 的權限，再原樣重套備份裡的 ACL（2026-10-07 演練抓到 RPC 權限多給 anon）。data／UUID remap 時尚無 public 使用者 trigger，不使用 replica 模式隱藏外鍵錯誤。post-data 與停用全部 public 使用者 trigger 在同一個交易內完成，外鍵 constraint trigger 保持啟用。原 webhook secret 可能存在 archive，演練不刪其定義，但**所有 public USER trigger 保持 DISABLED**，包含 audit/version trigger，避免通知與資料改寫。演練限讀取；不要在這個 trigger 停用狀態測專案寫入。Dashboard 的「支援已啟用」不代表通知 trigger 有啟用；SQL `tgenabled='D'` 才是驗收條件。[Webhook 底層是 PostgreSQL trigger](https://supabase.com/docs/guides/database/webhooks)、[停用 trigger 語法](https://www.postgresql.org/docs/current/sql-altertable.html)
 
    出錯只顯示階段，測試 public 可能留下部分還原。不要盲目重跑／加 `--clean`；從 Dashboard 刪除這個測試專案並新建、重新登記 ref 和帳號後再試。不要將這段流程用在已有資料的正式專案。
 

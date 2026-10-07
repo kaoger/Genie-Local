@@ -140,6 +140,7 @@ PSQL_prepare.sql
 RESTORE_pre-data
 RESTORE_data
 PSQL_remap.sql
+RESTORE_
 RESTORE_post-data
 PSQL_post-wrapper.sql
 PSQL_verify-restore.sql
