@@ -434,6 +434,16 @@ dialog.drawer{inset:0;margin:0 0 0 auto;width:min(680px,100%);max-height:100dvh}
   #info-dialog:has(.strategy-dialog-body) #info-body{height:auto;flex:1}
 }
 
+/* ================= v8.1.1：頂部提示條承接安全區與離線橫幅 ================= */
+main{--top-notice-offset:var(--safe-top)}
+main:has(>#storage-warning:not([hidden]),>#sync-readonly:not([hidden])){--header-safe-top:0px}
+#storage-warning{margin-top:calc(12px + var(--top-notice-offset));margin-left:calc(16px + var(--safe-left));margin-right:calc(16px + var(--safe-right))}
+main>#sync-readonly{margin-top:var(--top-notice-offset);padding-left:calc(20px + var(--safe-left));padding-right:calc(20px + var(--safe-right))}
+main>#storage-warning:not([hidden])+#sync-readonly{margin-top:0}
+/* 第一條可見提示接在橫幅下緣；頁首仍以橫幅高度作為 sticky 的上緣。 */
+body:has(.offline-banner:not([hidden])) main{--top-notice-offset:var(--offline-height,0px)}
+body:has(.offline-banner:not([hidden])) main:has(>#storage-warning:not([hidden]),>#sync-readonly:not([hidden])) :is(.page-header,.detail-header){margin-top:0}
+
 /* ================= v8.2：待聯絡四級摘要與導覽徽章 ================= */
 .wait-today{color:#166534;background:#dcfce7}
 .wait-recent{color:#1e40af;background:#dbeafe}
