@@ -146,8 +146,10 @@ cat >"$work/worker.sh" <<'WORKER'
 set -u
 cd /work || exit 1
 pg_restore -l archive.dump >toc || exit 1
-# New Supabase already owns public. Skip only that CREATE SCHEMA TOC item.
-awk '!/ SCHEMA - public /' toc >restore.list || exit 1
+# New Supabase already owns public and its platform default privileges.
+# Skip the CREATE SCHEMA item and DEFAULT ACL items (postgres cannot alter
+# supabase_admin's defaults; the new project already has its own).
+awk '!/ SCHEMA - public / && !/ DEFAULT ACL /' toc >restore.list || exit 1
 psql -X -q -v ON_ERROR_STOP=1 -f prepare.sql || exit 1
 pg_restore --exit-on-error --no-owner --section=pre-data --use-list=restore.list --dbname=postgres archive.dump || exit 1
 pg_restore --exit-on-error --no-owner --section=data --use-list=restore.list --dbname=postgres archive.dump || exit 1
