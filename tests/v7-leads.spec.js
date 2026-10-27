@@ -14,7 +14,7 @@ const row = (id, extra = {}) => ({
   budget_range: '100–200 萬', start_time: '1–3 個月',
   completed_at: '2026-09-30T16:30:00.000Z', contact_result: null,
   contact_result_at: null, contact_first_at: null, contact_undo_until: null,
-  lead_grade: 'normal', notification_status: 'sent', messenger_user_id: null, ...extra,
+  lead_grade: 'normal', notification_status: 'sent', messenger_user_id: null, messenger_thread_id: null, ...extra,
 });
 const test = base.extend({
   api: [async ({ page }, use) => {

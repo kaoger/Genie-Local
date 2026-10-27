@@ -3,7 +3,7 @@
 /* ================= 客戶名單與聯絡結果 ================= */
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-const columns = 'id,status,answers,customer_name,phone,project_type,location,interior_area,budget_range,start_time,completed_at,contact_result,contact_result_at,contact_first_at,contact_undo_until,lead_grade,notification_status,messenger_user_id';
+const columns = 'id,status,answers,customer_name,phone,project_type,location,interior_area,budget_range,start_time,completed_at,contact_result,contact_result_at,contact_first_at,contact_undo_until,lead_grade,notification_status,messenger_user_id,messenger_thread_id';
 const sections = {
   pending: { size: 50, order: 'completed_at', ascending: true, empty: '目前沒有待聯絡的客戶' },
   contacted: { size: 20, order: 'contact_result_at', ascending: false, empty: '還沒有已回報的客戶' },
@@ -588,6 +588,12 @@ async function undoResult(lead) {
 async function openMessenger(lead) {
   if (!/^\d+$/.test(String(lead.messenger_user_id ?? ''))) return;
   const config = window.GENIE_CONFIG;
+  const threadId = String(lead.messenger_thread_id ?? '');
+  if (/^[0-9]{1,30}$/.test(threadId)) {
+    // 保留點擊當下的使用者手勢，必須在任何 await 前開啟對話。
+    window.open(`https://www.facebook.com/${encodeURIComponent(config.metaPageId)}/inbox/${threadId}/?section=messages`, '_blank', 'noopener');
+    return;
+  }
   const url = `https://business.facebook.com/latest/inbox/all/?asset_id=${encodeURIComponent(config.metaPageId)}&business_id=${encodeURIComponent(config.metaBusinessId)}`;
   window.open(url, '_blank', 'noopener');
   const name = valueText(lead.customer_name);
