@@ -585,11 +585,15 @@ async function undoResult(lead) {
     });
   }
 }
+function isMobileDevice() {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+}
 async function openMessenger(lead) {
   if (!/^\d+$/.test(String(lead.messenger_user_id ?? ''))) return;
   const config = window.GENIE_CONFIG;
   const threadId = String(lead.messenger_thread_id ?? '');
-  if (/^[0-9]{1,30}$/.test(threadId)) {
+  if (!isMobileDevice() && /^[0-9]{1,30}$/.test(threadId)) {
     // 保留點擊當下的使用者手勢，必須在任何 await 前開啟對話。
     window.open(`https://www.facebook.com/${encodeURIComponent(config.metaPageId)}/inbox/${threadId}/?section=messages`, '_blank', 'noopener');
     return;
